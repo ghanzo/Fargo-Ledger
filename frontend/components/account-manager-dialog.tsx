@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Pencil, Check, X } from "lucide-react";
 import { useAccount } from "@/context/account-context";
 
 interface AccountManagerDialogProps {
@@ -16,8 +16,10 @@ interface AccountManagerDialogProps {
 
 export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialogProps) {
   const { accounts, refreshAccounts } = useAccount();
-  const [newName, setNewName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [newName,    setNewName]    = useState("");
+  const [loading,    setLoading]    = useState(false);
+  const [editingId,  setEditingId]  = useState<number | null>(null);
+  const [editName,   setEditName]   = useState("");
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
@@ -30,6 +32,28 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
       toast.error(err?.response?.data?.detail ?? "Failed to create account");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startEdit = (id: number, currentName: string) => {
+    setEditingId(id);
+    setEditName(currentName);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditName("");
+  };
+
+  const handleRename = async (id: number) => {
+    if (!editName.trim()) return;
+    try {
+      await axios.put(`http://localhost:8000/accounts/${id}`, { name: editName.trim() });
+      setEditingId(null);
+      setEditName("");
+      await refreshAccounts();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to rename account");
     }
   };
 
@@ -52,15 +76,53 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
         {accounts.length > 0 && (
           <div className="divide-y border rounded-lg mb-4">
             {accounts.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 px-3 py-2">
-                <span className="flex-1 text-sm font-medium text-zinc-700">{a.name}</span>
-                <button
-                  onClick={() => handleDelete(a.id)}
-                  className="text-zinc-300 hover:text-red-500 transition-colors"
-                  title="Delete account"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+              <div key={a.id} className="flex items-center gap-2 px-3 py-2">
+                {editingId === a.id ? (
+                  <>
+                    <Input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename(a.id);
+                        if (e.key === "Escape") cancelEdit();
+                      }}
+                      className="h-7 text-sm flex-1"
+                    />
+                    <button
+                      onClick={() => handleRename(a.id)}
+                      className="text-zinc-400 hover:text-emerald-600 transition-colors"
+                      title="Save"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      className="text-zinc-400 hover:text-zinc-700 transition-colors"
+                      title="Cancel"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-sm font-medium text-zinc-700">{a.name}</span>
+                    <button
+                      onClick={() => startEdit(a.id, a.name)}
+                      className="text-zinc-300 hover:text-zinc-600 transition-colors"
+                      title="Rename account"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(a.id)}
+                      className="text-zinc-300 hover:text-red-500 transition-colors"
+                      title="Delete account"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>

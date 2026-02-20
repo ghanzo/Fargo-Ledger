@@ -256,22 +256,20 @@ def get_top_vendors(
         Transaction.vendor != None,
     )
     if category:
-        # Inside a category drill-down show all vendor activity (income + expense)
         query = query.filter(Transaction.category == category)
-    else:
-        # Top-level vendor list: expenses only
-        query = query.filter(Transaction.amount < 0)
     query = apply_date_filter(query, date_from, date_to)
     rows = query.all()
 
     totals: dict = defaultdict(lambda: {"total": 0.0, "count": 0})
     for row in rows:
-        # Category drill-down: net signed sum so income/expense cancel correctly.
-        # All-vendors view: abs of expenses only (rows already filtered amount < 0).
-        totals[row.vendor]["total"] += float(row.amount) if category else abs(float(row.amount))
+        totals[row.vendor]["total"] += float(row.amount)  # signed net
         totals[row.vendor]["count"] += 1
 
-    ranked = sorted(totals.items(), key=lambda x: abs(x[1]["total"]), reverse=True)[:limit]
+    # Positives (income) first high→low, then negatives (expense) largest→smallest
+    ranked = sorted(
+        totals.items(),
+        key=lambda x: (x[1]["total"] < 0, -abs(x[1]["total"]))
+    )[:limit]
     return [{"vendor": v, "total": round(d["total"], 2), "count": d["count"]} for v, d in ranked]
 
 

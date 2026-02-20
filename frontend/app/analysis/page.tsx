@@ -223,14 +223,12 @@ function CategoryTable({
 function VendorTable({
   vendors,
   showPct,
-  signed,
   totalForPct,
   pctLabel,
   onSelect,
 }: {
   vendors: VendorData[];
   showPct: boolean;
-  signed?: boolean;
   totalForPct?: number;
   pctLabel?: string;
   onSelect: (v: string) => void;
@@ -244,7 +242,7 @@ function VendorTable({
         <thead>
           <tr className="border-b text-left">
             <th className="pb-2 text-xs font-medium text-zinc-400">Vendor</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Spend</th>
+            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Amount</th>
             <th className="pb-2 text-xs font-medium text-zinc-400 text-right"># Txns</th>
             {showPct && <th className="pb-2 text-xs font-medium text-zinc-400 text-right">{pctLabel ?? "% of Total"}</th>}
             <th className="pb-2 w-6"></th>
@@ -263,10 +261,8 @@ function VendorTable({
                 className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors group"
               >
                 <td className={`py-2.5 font-medium ${v.vendor === "(No Vendor)" ? "text-zinc-400 italic" : "text-zinc-800"}`}>{v.vendor}</td>
-                <td className={`py-2.5 text-right font-medium ${signed && v.total >= 0 ? "text-emerald-600" : "text-zinc-700"}`}>
-                  {signed
-                    ? (v.total >= 0 ? `+${fmt(v.total)}` : `−${fmt(Math.abs(v.total))}`)
-                    : fmt(v.total)}
+                <td className={`py-2.5 text-right font-medium ${v.total >= 0 ? "text-emerald-600" : "text-zinc-700"}`}>
+                  {v.total >= 0 ? `+${fmt(v.total)}` : `−${fmt(Math.abs(v.total))}`}
                 </td>
                 <td className="py-2.5 text-right text-zinc-500">{v.count}</td>
                 {showPct && <td className="py-2.5 text-right text-zinc-400">{pct}%</td>}
@@ -465,9 +461,14 @@ export default function AnalysisPage() {
       setSummary(sumRes.data);
       const uncategorized: Transaction[] = uncatRes.data;
       setUncategorizedTxns(uncategorized);
-      const cats: CategoryData[] = [...catRes.data].sort(
-        (a, b) => Math.abs(b.total) - Math.abs(a.total)
-      );
+      const sortCats = (list: CategoryData[]) =>
+        list.sort((a, b) => {
+          const aPos = a.total >= 0, bPos = b.total >= 0;
+          if (aPos !== bPos) return aPos ? -1 : 1;  // income first
+          if (aPos) return b.total - a.total;         // income: high → low
+          return a.total - b.total;                   // expense: most negative first
+        });
+      const cats = sortCats([...catRes.data]);
       if (uncategorized.length > 0) {
         const total = uncategorized.reduce(
           (sum, tx) => sum + parseFloat(String(tx.amount)), 0
@@ -738,7 +739,6 @@ export default function AnalysisPage() {
                   <VendorTable
                     vendors={catVendors}
                     showPct
-                    signed
                     totalForPct={categories.find((c) => c.category === catDrill.category)?.total}
                     pctLabel="% of Category"
                     onSelect={handleSelectCatVendor}

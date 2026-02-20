@@ -13,9 +13,10 @@ interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  accountId: number;
 }
 
-export function ImportDialog({ open, onOpenChange, onSuccess }: ImportDialogProps) {
+export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: ImportDialogProps) {
   const [file,    setFile]    = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result,  setResult]  = useState<{ imported: number; skipped: number } | null>(null);
@@ -44,6 +45,7 @@ export function ImportDialog({ open, onOpenChange, onSuccess }: ImportDialogProp
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("account_id", String(accountId));
       const res = await axios.post("http://localhost:8000/import/csv", form);
       setResult(res.data);
       toast.success(`Imported ${res.data.imported} new transactions`);

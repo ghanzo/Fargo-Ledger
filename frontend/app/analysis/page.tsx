@@ -8,6 +8,7 @@ import { Settings2, ChevronLeft, ChevronRight } from "lucide-react";
 import { BudgetDialog } from "@/components/budget-dialog";
 import { TransactionPanel } from "@/components/transaction-panel";
 import { Transaction } from "@/types/transaction";
+import { useAccount } from "@/context/account-context";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,13 @@ interface BudgetStatus {
   percentage: number;
 }
 
+interface ProjectData {
+  project: string | null;
+  income: number;
+  expenses: number;
+  count: number;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const API = "http://localhost:8000";
@@ -78,14 +86,17 @@ function StatCard({
 function PeriodSelector({
   periodMode, setPeriodMode,
   selectedMonth, setSelectedMonth,
+  selectedYear, setSelectedYear,
   dateFrom, setDateFrom,
   dateTo, setDateTo,
   onApplyCustom,
 }: {
-  periodMode: "month" | "custom";
-  setPeriodMode: (m: "month" | "custom") => void;
+  periodMode: "month" | "year" | "custom";
+  setPeriodMode: (m: "month" | "year" | "custom") => void;
   selectedMonth: { year: number; month: number };
   setSelectedMonth: (m: { year: number; month: number }) => void;
+  selectedYear: number;
+  setSelectedYear: (y: number) => void;
   dateFrom: string; setDateFrom: (s: string) => void;
   dateTo: string; setDateTo: (s: string) => void;
   onApplyCustom: () => void;
@@ -103,7 +114,25 @@ function PeriodSelector({
 
   return (
     <div className="flex items-center gap-3 flex-wrap">
-      {periodMode === "month" ? (
+      {/* Mode toggle pills */}
+      <div className="flex rounded-md border overflow-hidden text-xs">
+        {(["month", "year", "custom"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setPeriodMode(mode)}
+            className={`px-3 py-1.5 transition-colors ${
+              periodMode === mode
+                ? "bg-zinc-900 text-white"
+                : "text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50"
+            }`}
+          >
+            {mode === "month" ? "Month" : mode === "year" ? "Year" : "Custom"}
+          </button>
+        ))}
+      </div>
+
+      {/* Period navigator */}
+      {periodMode === "month" && (
         <div className="flex items-center gap-1">
           <button
             onClick={prevMonth}
@@ -121,7 +150,29 @@ function PeriodSelector({
             <ChevronRight className="h-4 w-4 text-zinc-500" />
           </button>
         </div>
-      ) : (
+      )}
+
+      {periodMode === "year" && (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSelectedYear(selectedYear - 1)}
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4 text-zinc-500" />
+          </button>
+          <span className="text-sm font-medium text-zinc-700 min-w-[60px] text-center">
+            {selectedYear}
+          </span>
+          <button
+            onClick={() => setSelectedYear(selectedYear + 1)}
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+          >
+            <ChevronRight className="h-4 w-4 text-zinc-500" />
+          </button>
+        </div>
+      )}
+
+      {periodMode === "custom" && (
         <div className="flex items-center gap-2">
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px] text-xs h-8" />
           <span className="text-zinc-300 text-xs">→</span>
@@ -129,12 +180,6 @@ function PeriodSelector({
           <Button size="sm" onClick={onApplyCustom} className="h-8 text-xs">Apply</Button>
         </div>
       )}
-      <button
-        onClick={() => setPeriodMode(periodMode === "month" ? "custom" : "month")}
-        className="text-xs text-zinc-400 hover:text-zinc-700 underline underline-offset-2 transition-colors"
-      >
-        {periodMode === "month" ? "Custom range" : "Month view"}
-      </button>
     </div>
   );
 }
@@ -392,21 +437,88 @@ function MonthlyTrendsTable({ monthly }: { monthly: MonthlyData[] }) {
   );
 }
 
+function ProjectTable({
+  projects,
+  onSelect,
+}: {
+  projects: ProjectData[];
+  onSelect: (p: string | null) => void;
+}) {
+  if (projects.length === 0) {
+    return <div className="text-sm text-zinc-400 py-8 text-center">No project data for this period.</div>;
+  }
+  const sorted = [...projects].sort((a, b) => {
+    if (a.project === null) return 1;
+    if (b.project === null) return -1;
+    return b.expenses - a.expenses;
+  });
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left">
+            <th className="pb-2 text-xs font-medium text-zinc-400">Project</th>
+            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Income</th>
+            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Expenses</th>
+            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Net</th>
+            <th className="pb-2 text-xs font-medium text-zinc-400 text-right"># Txns</th>
+            <th className="pb-2 w-6"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((p) => {
+            const net = p.income - p.expenses;
+            const label = p.project ?? "(No Project)";
+            return (
+              <tr
+                key={label}
+                onClick={() => onSelect(p.project)}
+                className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors group"
+              >
+                <td className={`py-2.5 font-medium ${p.project === null ? "text-zinc-400 italic" : "text-zinc-800"}`}>
+                  {label}
+                </td>
+                <td className="py-2.5 text-right text-emerald-600 font-medium">
+                  {p.income > 0 ? `+${fmt(p.income)}` : <span className="text-zinc-300">—</span>}
+                </td>
+                <td className="py-2.5 text-right text-zinc-700">
+                  {p.expenses > 0 ? `−${fmt(p.expenses)}` : <span className="text-zinc-300">—</span>}
+                </td>
+                <td className={`py-2.5 text-right font-semibold ${net >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  {net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}
+                </td>
+                <td className="py-2.5 text-right text-zinc-500">{p.count}</td>
+                <td className="py-2.5 text-right">
+                  <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 transition-colors ml-auto" />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AnalysisPage() {
+  const { activeAccount } = useAccount();
+
   // Period
   const now = new Date();
-  const [periodMode, setPeriodMode] = useState<"month" | "custom">("month");
+  const [periodMode, setPeriodMode] = useState<"month" | "year" | "custom">("month");
   const [selectedMonth, setSelectedMonth] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [customApplied, setCustomApplied] = useState({ from: "", to: "" });
 
   // Tabs & drill-down
-  const [activeTab, setActiveTab] = useState<"category" | "vendor" | "trends">("category");
+  const [activeTab, setActiveTab] = useState<"category" | "vendor" | "project" | "trends">("category");
   const [catDrill, setCatDrill] = useState<{ category?: string; vendor?: string; directTx?: boolean }>({});
   const [venDrill, setVenDrill] = useState<{ vendor?: string }>({});
+  const [projDrill, setProjDrill] = useState<{ project?: string | null; category?: string }>({});
 
   // Data
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -418,6 +530,8 @@ export default function AnalysisPage() {
   const [uncategorizedTxns, setUncategorizedTxns] = useState<Transaction[]>([]);
   const [monthly, setMonthly] = useState<MonthlyData[]>([]);
   const [budgetStatuses, setBudgetStatuses] = useState<BudgetStatus[]>([]);
+  const [projects, setProjects] = useState<ProjectData[]>([]);
+  const [projCategories, setProjCategories] = useState<CategoryData[]>([]);
 
   // Loading states
   const [loadingSummary, setLoadingSummary] = useState(true);
@@ -431,31 +545,34 @@ export default function AnalysisPage() {
   // ── Period params ──
   const periodParams = useMemo(() => {
     if (periodMode === "custom") return { from: customApplied.from, to: customApplied.to };
+    if (periodMode === "year")   return { from: `${selectedYear}-01-01`, to: `${selectedYear}-12-31` };
     const { year, month } = selectedMonth;
     const lastDay = new Date(year, month, 0).getDate();
     return {
       from: `${year}-${String(month).padStart(2, "0")}-01`,
       to:   `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
     };
-  }, [periodMode, selectedMonth, customApplied]);
+  }, [periodMode, selectedMonth, selectedYear, customApplied]);
 
   const buildQs = useCallback((extra: Record<string, string> = {}) => {
     const p = new URLSearchParams();
+    if (activeAccount) p.set("account_id", String(activeAccount.id));
     if (periodParams.from) p.set("date_from", periodParams.from);
     if (periodParams.to)   p.set("date_to",   periodParams.to);
     Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); });
     return p.toString() ? `?${p}` : "";
-  }, [periodParams]);
+  }, [periodParams, activeAccount]);
 
   // ── Fetch summary + categories (on period change) ──
   const fetchSummaryAndCategories = useCallback(async () => {
+    if (!activeAccount) return;
     setLoadingSummary(true);
     try {
       const qs = buildQs();
       const [sumRes, catRes, budRes, uncatRes] = await Promise.all([
         axios.get(`${API}/stats/summary${qs}`),
         axios.get(`${API}/stats/category_breakdown${qs}`),
-        axios.get(`${API}/stats/budget_status`),
+        axios.get(`${API}/stats/budget_status${buildQs()}`),
         axios.get(`${API}/transactions${buildQs({ has_category: "false" })}`),
       ]);
       setSummary(sumRes.data);
@@ -482,17 +599,18 @@ export default function AnalysisPage() {
     } finally {
       setLoadingSummary(false);
     }
-  }, [buildQs]);
+  }, [buildQs, activeAccount]);
 
-  // ── Fetch monthly trends (once on mount) ──
+  // ── Fetch monthly trends (when account changes) ──
   const fetchMonthly = useCallback(async () => {
+    if (!activeAccount) return;
     try {
-      const res = await axios.get(`${API}/stats/monthly`);
+      const res = await axios.get(`${API}/stats/monthly?account_id=${activeAccount.id}`);
       setMonthly(res.data);
     } catch {
       // silent
     }
-  }, []);
+  }, [activeAccount]);
 
   // ── Fetch all vendors (when By Vendor tab opens or period changes) ──
   const fetchAllVendors = useCallback(async () => {
@@ -550,12 +668,63 @@ export default function AnalysisPage() {
     }
   }, [buildQs]);
 
+  // ── Fetch project breakdown ──
+  const fetchProjectBreakdown = useCallback(async () => {
+    setLoadingDrill(true);
+    try {
+      const res = await axios.get(`${API}/stats/project_breakdown${buildQs()}`);
+      setProjects(res.data);
+    } catch {
+      // silent
+    } finally {
+      setLoadingDrill(false);
+    }
+  }, [buildQs]);
+
+  // ── Fetch categories within a project ──
+  const fetchProjCategories = useCallback(async (project: string | null) => {
+    setLoadingDrill(true);
+    try {
+      const projectParam = project === null ? "__none__" : project;
+      const res = await axios.get(`${API}/stats/category_breakdown${buildQs({ project: projectParam })}`);
+      const sortCats = (list: CategoryData[]) =>
+        list.sort((a, b) => {
+          const aPos = a.total >= 0, bPos = b.total >= 0;
+          if (aPos !== bPos) return aPos ? -1 : 1;
+          if (aPos) return b.total - a.total;
+          return a.total - b.total;
+        });
+      setProjCategories(sortCats([...res.data]));
+    } catch {
+      // silent
+    } finally {
+      setLoadingDrill(false);
+    }
+  }, [buildQs]);
+
+  // ── Fetch transactions within a project + category ──
+  const fetchProjCategoryTxns = useCallback(async (project: string | null, category: string) => {
+    setLoadingDrill(true);
+    try {
+      const extra: Record<string, string> = { category };
+      if (project === null) extra.has_project = "false";
+      else extra.project = project;
+      const res = await axios.get(`${API}/transactions${buildQs(extra)}`);
+      setTransactions(res.data);
+    } catch {
+      // silent
+    } finally {
+      setLoadingDrill(false);
+    }
+  }, [buildQs]);
+
   // ── Effects ──
   useEffect(() => {
     fetchSummaryAndCategories();
     // Reset drill-down on period change
     setCatDrill({});
     setVenDrill({});
+    setProjDrill({});
     setTransactions([]);
     setCatVendors([]);
     setUnassignedTxns([]);
@@ -568,6 +737,10 @@ export default function AnalysisPage() {
   useEffect(() => {
     if (activeTab === "vendor") fetchAllVendors();
   }, [activeTab, fetchAllVendors]);
+
+  useEffect(() => {
+    if (activeTab === "project") fetchProjectBreakdown();
+  }, [activeTab, fetchProjectBreakdown]);
 
   // ── Drill-down handlers ──
   const handleSelectCategory = (category: string) => {
@@ -588,6 +761,18 @@ export default function AnalysisPage() {
     } else {
       fetchTransactions(vendor, catDrill.category);
     }
+  };
+
+  const handleSelectProject = (project: string | null) => {
+    setProjDrill({ project });
+    setTransactions([]);
+    fetchProjCategories(project);
+  };
+
+  const handleSelectProjCategory = (category: string) => {
+    const currentProject = projDrill.project ?? null;
+    setProjDrill((prev) => ({ ...prev, category }));
+    fetchProjCategoryTxns(currentProject, category);
   };
 
   const handleSelectVendor = (vendor: string) => {
@@ -612,6 +797,8 @@ export default function AnalysisPage() {
       fetchTransactions(catDrill.vendor, catDrill.category);
     } else if (venDrill.vendor) {
       fetchTransactions(venDrill.vendor);
+    } else if (projDrill.category !== undefined) {
+      fetchProjCategoryTxns(projDrill.project ?? null, projDrill.category);
     }
     fetchSummaryAndCategories();
   };
@@ -649,6 +836,19 @@ export default function AnalysisPage() {
     return items;
   };
 
+  const projBreadcrumb = () => {
+    const items = [{ label: "All Projects", onClick: () => { setProjDrill({}); setTransactions([]); } }];
+    if (projDrill.project !== undefined) {
+      const projLabel = projDrill.project ?? "(No Project)";
+      const capturedProject = projDrill.project;
+      items.push({ label: projLabel, onClick: () => { setProjDrill({ project: capturedProject }); setTransactions([]); fetchProjCategories(capturedProject ?? null); } });
+    }
+    if (projDrill.category !== undefined) {
+      items.push({ label: projDrill.category, onClick: () => {} });
+    }
+    return items;
+  };
+
   // ── Render ──
   const net = summary?.net ?? 0;
 
@@ -672,6 +872,8 @@ export default function AnalysisPage() {
           setPeriodMode={setPeriodMode}
           selectedMonth={selectedMonth}
           setSelectedMonth={setSelectedMonth}
+          selectedYear={selectedYear}
+          setSelectedYear={setSelectedYear}
           dateFrom={dateFrom}
           setDateFrom={setDateFrom}
           dateTo={dateTo}
@@ -696,7 +898,7 @@ export default function AnalysisPage() {
       <div className="bg-white rounded-xl border shadow-sm mb-6">
         {/* Tab bar */}
         <div className="flex border-b">
-          {(["category", "vendor", "trends"] as const).map((tab) => (
+          {(["category", "vendor", "project", "trends"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -706,7 +908,7 @@ export default function AnalysisPage() {
                   : "border-transparent text-zinc-400 hover:text-zinc-600"
               }`}
             >
-              {tab === "category" ? "By Category" : tab === "vendor" ? "By Vendor" : "Monthly Trends"}
+              {tab === "category" ? "By Category" : tab === "vendor" ? "By Vendor" : tab === "project" ? "By Project" : "Monthly Trends"}
             </button>
           ))}
         </div>
@@ -790,6 +992,52 @@ export default function AnalysisPage() {
                   <TransactionTable
                     transactions={transactions}
                     showCategory
+                    onSelect={handleOpenPanel}
+                  />
+                )
+              )}
+            </div>
+          )}
+
+          {/* ── BY PROJECT TAB ── */}
+          {activeTab === "project" && (
+            <div>
+              <div className="mb-4">
+                <Breadcrumb items={projBreadcrumb()} />
+              </div>
+
+              {/* Level 0: project list */}
+              {projDrill.project === undefined && (
+                loadingDrill ? (
+                  <div className="py-8 text-center text-zinc-400 text-sm">Loading projects...</div>
+                ) : (
+                  <ProjectTable projects={projects} onSelect={handleSelectProject} />
+                )
+              )}
+
+              {/* Level 1: categories within project */}
+              {projDrill.project !== undefined && projDrill.category === undefined && (
+                loadingDrill ? (
+                  <div className="py-8 text-center text-zinc-400 text-sm">Loading categories...</div>
+                ) : (
+                  <CategoryTable
+                    categories={projCategories}
+                    totalExpenses={projects.find((p) => p.project === projDrill.project)?.expenses ?? 0}
+                    totalIncome={projects.find((p) => p.project === projDrill.project)?.income ?? 0}
+                    onSelect={handleSelectProjCategory}
+                  />
+                )
+              )}
+
+              {/* Level 2: transactions within project + category */}
+              {projDrill.category !== undefined && (
+                loadingDrill ? (
+                  <div className="py-8 text-center text-zinc-400 text-sm">Loading transactions...</div>
+                ) : (
+                  <TransactionTable
+                    transactions={transactions}
+                    showCategory={false}
+                    showVendor
                     onSelect={handleOpenPanel}
                   />
                 )

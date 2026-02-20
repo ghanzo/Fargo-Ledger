@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, Plus } from "lucide-react";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { useAccount } from "@/context/account-context";
 
 interface Budget {
   id: number;
@@ -27,10 +28,12 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
   const [category, setCategory] = useState("");
   const [limit,    setLimit]    = useState("");
   const [loading,  setLoading]  = useState(false);
+  const { activeAccount } = useAccount();
 
   const fetchBudgets = async () => {
+    if (!activeAccount) return;
     try {
-      const res = await axios.get("http://localhost:8000/budgets");
+      const res = await axios.get(`http://localhost:8000/budgets?account_id=${activeAccount.id}`);
       setBudgets(res.data);
     } catch {
       toast.error("Failed to load budgets");
@@ -40,12 +43,12 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
   useEffect(() => { if (open) fetchBudgets(); }, [open]);
 
   const handleAdd = async () => {
-    if (!category || !limit) return;
+    if (!category || !limit || !activeAccount) return;
     const numLimit = parseFloat(limit);
     if (isNaN(numLimit) || numLimit <= 0) { toast.error("Enter a valid monthly limit"); return; }
     setLoading(true);
     try {
-      await axios.post("http://localhost:8000/budgets", { category, monthly_limit: numLimit });
+      await axios.post(`http://localhost:8000/budgets?account_id=${activeAccount.id}`, { category, monthly_limit: numLimit });
       setCategory(""); setLimit("");
       await fetchBudgets();
       onSaved?.();

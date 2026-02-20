@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -7,10 +7,11 @@ from datetime import date
 from collections import defaultdict, Counter
 
 from src.database import SessionLocal, engine
-from src.models import Base, Transaction, Budget
+from src.models import Base, Transaction, Budget, Account
 from src.schemas import (
     TransactionResponse, TransactionUpdate, TransactionBulkUpdate, TransactionRestore,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetStatus,
+    AccountCreate, AccountResponse,
 )
 from src.importer import import_csv_content
 
@@ -52,21 +53,66 @@ def read_root():
     return {"status": "ok", "message": "Finance API is running"}
 
 
+# ── Account CRUD ───────────────────────────────────────────────────────────
+
+@app.get("/accounts", response_model=List[AccountResponse])
+def list_accounts(db: Session = Depends(get_db)):
+    return db.query(Account).order_by(Account.name).all()
+
+
+@app.post("/accounts", response_model=AccountResponse)
+def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
+    existing = db.query(Account).filter(Account.name == payload.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Account with this name already exists")
+    account = Account(name=payload.name)
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@app.put("/accounts/{account_id}", response_model=AccountResponse)
+def rename_account(account_id: int, payload: AccountCreate, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account.name = payload.name
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@app.delete("/accounts/{account_id}")
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    db.delete(account)
+    db.commit()
+    return {"message": "Account deleted"}
+
+
+# ── Transactions ───────────────────────────────────────────────────────────
+
 @app.get("/transactions", response_model=List[TransactionResponse])
 def get_transactions(
+    account_id: int = Query(...),
     skip: int = 0,
     limit: Optional[int] = None,
     cleaned: Optional[bool] = None,
     search: Optional[str] = None,
     has_vendor: Optional[bool] = None,
     has_category: Optional[bool] = None,
+    has_project: Optional[bool] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     vendor: Optional[str] = None,
     category: Optional[str] = None,
+    project: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction)
+    query = db.query(Transaction).filter(Transaction.account_id == account_id)
 
     if cleaned is not None:
         query = query.filter(Transaction.is_cleaned == cleaned)
@@ -85,10 +131,16 @@ def get_transactions(
         query = query.filter(Transaction.category != None)
     elif has_category is False:
         query = query.filter(Transaction.category == None)
+    if has_project is True:
+        query = query.filter(Transaction.project != None)
+    elif has_project is False:
+        query = query.filter(Transaction.project == None)
     if vendor:
         query = query.filter(Transaction.vendor == vendor)
     if category:
         query = query.filter(Transaction.category == category)
+    if project:
+        query = query.filter(Transaction.project == project)
 
     query = apply_date_filter(query, date_from, date_to)
     query = query.order_by(Transaction.transaction_date.desc()).offset(skip)
@@ -103,7 +155,7 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    for field in ("category", "vendor", "notes", "tags", "tax_deductible", "is_cleaned"):
+    for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_cleaned"):
         val = getattr(update_data, field)
         if val is not None:
             setattr(tx, field, val)
@@ -114,36 +166,66 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
 
 
 @app.patch("/transactions/bulk")
-def bulk_update_transactions(payload: TransactionBulkUpdate, db: Session = Depends(get_db)):
+def bulk_update_transactions(
+    payload: TransactionBulkUpdate,
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
     update_data = payload.update_data.model_dump(exclude_unset=True)
     if not update_data:
         return {"message": "No changes provided"}
-    db.query(Transaction).filter(Transaction.id.in_(payload.ids)).update(
-        update_data, synchronize_session=False
-    )
+    db.query(Transaction).filter(
+        Transaction.id.in_(payload.ids),
+        Transaction.account_id == account_id,
+    ).update(update_data, synchronize_session=False)
     db.commit()
     return {"message": f"Updated {len(payload.ids)} transactions"}
 
 
 @app.get("/facets")
-def get_facets(db: Session = Depends(get_db)):
-    categories = db.query(Transaction.category).distinct().filter(Transaction.category != None).all()
-    vendors    = db.query(Transaction.vendor).distinct().filter(Transaction.vendor != None).all()
+def get_facets(account_id: int = Query(...), db: Session = Depends(get_db)):
+    categories = (
+        db.query(Transaction.category)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .all()
+    )
+    vendors = (
+        db.query(Transaction.vendor)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.vendor != None)
+        .all()
+    )
+    projects = (
+        db.query(Transaction.project)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.project != None)
+        .all()
+    )
     return {
         "categories": sorted([c[0] for c in categories if c[0]]),
         "vendors":    sorted([v[0] for v in vendors    if v[0]]),
+        "projects":   sorted([p[0] for p in projects   if p[0]]),
     }
 
 
 # ── Import ─────────────────────────────────────────────────────────────────
 
 @app.post("/import/csv")
-async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_csv(
+    account_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a .csv")
+    # Verify account exists
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
     content = await file.read()
     try:
-        result = import_csv_content(content, file.filename, db)
+        result = import_csv_content(content, file.filename, db, account_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -180,25 +262,69 @@ def suggest_categorization(tx_id: str, db: Session = Depends(get_db)):
 
 @app.get("/stats/category_breakdown")
 def get_category_breakdown(
+    account_id: int = Query(...),
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    project: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Transaction.category, func.sum(Transaction.amount)).filter(
-        Transaction.category != None
+        Transaction.account_id == account_id,
+        Transaction.category != None,
     )
+    if project == "__none__":
+        query = query.filter(Transaction.project == None)
+    elif project is not None:
+        query = query.filter(Transaction.project == project)
     query = apply_date_filter(query, date_from, date_to)
     results = query.group_by(Transaction.category).all()
     return [{"category": r[0], "total": round(float(r[1]), 2)} for r in results]
 
 
-@app.get("/stats/summary")
-def get_summary(
+@app.get("/stats/project_breakdown")
+def get_project_breakdown(
+    account_id: int = Query(...),
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction.amount, Transaction.tax_deductible, Transaction.is_cleaned)
+    query = db.query(Transaction.project, Transaction.amount).filter(
+        Transaction.account_id == account_id
+    )
+    query = apply_date_filter(query, date_from, date_to)
+    rows = query.all()
+
+    proj_map: dict = defaultdict(lambda: {"income": 0.0, "expenses": 0.0, "count": 0})
+    for row in rows:
+        amount = float(row.amount)
+        key = row.project  # None = unassigned
+        if amount > 0:
+            proj_map[key]["income"] += amount
+        else:
+            proj_map[key]["expenses"] += abs(amount)
+        proj_map[key]["count"] += 1
+
+    return [
+        {
+            "project":  key,
+            "income":   round(v["income"],   2),
+            "expenses": round(v["expenses"], 2),
+            "count":    v["count"],
+        }
+        for key, v in proj_map.items()
+    ]
+
+
+@app.get("/stats/summary")
+def get_summary(
+    account_id: int = Query(...),
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Transaction.amount, Transaction.tax_deductible, Transaction.is_cleaned).filter(
+        Transaction.account_id == account_id
+    )
     query = apply_date_filter(query, date_from, date_to)
     rows = query.all()
 
@@ -221,11 +347,14 @@ def get_summary(
 
 @app.get("/stats/monthly")
 def get_monthly_stats(
+    account_id: int = Query(...),
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction.transaction_date, Transaction.amount)
+    query = db.query(Transaction.transaction_date, Transaction.amount).filter(
+        Transaction.account_id == account_id
+    )
     query = apply_date_filter(query, date_from, date_to)
     rows = query.all()
 
@@ -246,6 +375,7 @@ def get_monthly_stats(
 
 @app.get("/stats/top_vendors")
 def get_top_vendors(
+    account_id: int = Query(...),
     limit: int = 15,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
@@ -253,6 +383,7 @@ def get_top_vendors(
     db: Session = Depends(get_db),
 ):
     query = db.query(Transaction.vendor, Transaction.amount).filter(
+        Transaction.account_id == account_id,
         Transaction.vendor != None,
     )
     if category:
@@ -275,11 +406,13 @@ def get_top_vendors(
 
 @app.get("/stats/subscriptions")
 def get_subscriptions(
+    account_id: int = Query(...),
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Transaction.vendor, Transaction.transaction_date, Transaction.amount).filter(
+        Transaction.account_id == account_id,
         Transaction.vendor != None,
         Transaction.amount < 0,
     )
@@ -324,6 +457,7 @@ def bulk_restore_transactions(snapshots: List[TransactionRestore], db: Session =
             continue
         tx.vendor          = snap.vendor
         tx.category        = snap.category
+        tx.project         = snap.project
         tx.notes           = snap.notes
         tx.tags            = snap.tags
         tx.tax_deductible  = snap.tax_deductible
@@ -335,16 +469,23 @@ def bulk_restore_transactions(snapshots: List[TransactionRestore], db: Session =
 # ── Budget CRUD ─────────────────────────────────────────────────────────────
 
 @app.get("/budgets", response_model=List[BudgetResponse])
-def list_budgets(db: Session = Depends(get_db)):
-    return db.query(Budget).order_by(Budget.category).all()
+def list_budgets(account_id: int = Query(...), db: Session = Depends(get_db)):
+    return db.query(Budget).filter(Budget.account_id == account_id).order_by(Budget.category).all()
 
 
 @app.post("/budgets", response_model=BudgetResponse)
-def create_budget(payload: BudgetCreate, db: Session = Depends(get_db)):
-    existing = db.query(Budget).filter(Budget.category == payload.category).first()
+def create_budget(
+    payload: BudgetCreate,
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    existing = db.query(Budget).filter(
+        Budget.account_id == account_id,
+        Budget.category == payload.category,
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Budget for this category already exists")
-    budget = Budget(category=payload.category, monthly_limit=payload.monthly_limit)
+    budget = Budget(account_id=account_id, category=payload.category, monthly_limit=payload.monthly_limit)
     db.add(budget)
     db.commit()
     db.refresh(budget)
@@ -375,7 +516,11 @@ def delete_budget(budget_id: int, db: Session = Depends(get_db)):
 # ── Budget status ───────────────────────────────────────────────────────────
 
 @app.get("/stats/budget_status", response_model=List[BudgetStatus])
-def get_budget_status(month: Optional[str] = None, db: Session = Depends(get_db)):
+def get_budget_status(
+    account_id: int = Query(...),
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """Return spend vs budget for each budgeted category.
     month: YYYY-MM string; defaults to current calendar month."""
     from datetime import datetime
@@ -398,6 +543,7 @@ def get_budget_status(month: Optional[str] = None, db: Session = Depends(get_db)
     rows = (
         db.query(Transaction.category, func.sum(Transaction.amount))
         .filter(
+            Transaction.account_id == account_id,
             Transaction.category != None,
             Transaction.amount < 0,
             Transaction.transaction_date >= start,
@@ -408,7 +554,7 @@ def get_budget_status(month: Optional[str] = None, db: Session = Depends(get_db)
     )
     actual: dict = {r[0]: abs(float(r[1])) for r in rows}
 
-    budgets = db.query(Budget).order_by(Budget.category).all()
+    budgets = db.query(Budget).filter(Budget.account_id == account_id).order_by(Budget.category).all()
     result = []
     for b in budgets:
         spent     = actual.get(b.category, 0.0)

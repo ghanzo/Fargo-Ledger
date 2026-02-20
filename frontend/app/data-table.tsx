@@ -73,6 +73,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
   // Filter state — null = off, true = "has/yes", false = "no/hasn't"
   const [filterVendor,         setFilterVendor]         = useState<FilterState>(null);
   const [filterCategory,       setFilterCategory]       = useState<FilterState>(null);
+  const [filterProject,        setFilterProject]        = useState<FilterState>(null);
   const [filterTaxDeductible,  setFilterTaxDeductible]  = useState<FilterState>(null);
   const [filterCategorized,    setFilterCategorized]    = useState<FilterState>(null);
   const [dateFrom, setDateFrom] = useState("");
@@ -89,6 +90,8 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     else if (filterVendor === false)  result = result.filter((tx) => !tx.vendor);
     if (filterCategory === true)      result = result.filter((tx) => !!tx.category);
     else if (filterCategory === false)result = result.filter((tx) => !tx.category);
+    if (filterProject === true)       result = result.filter((tx) => !!tx.project);
+    else if (filterProject === false) result = result.filter((tx) => !tx.project);
     if (filterTaxDeductible === true) result = result.filter((tx) => !!tx.tax_deductible);
     else if (filterTaxDeductible === false) result = result.filter((tx) => !tx.tax_deductible);
     if (filterCategorized === true)   result = result.filter((tx) => tx.is_cleaned);
@@ -96,7 +99,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     if (dateFrom) result = result.filter((tx) => tx.transaction_date >= dateFrom);
     if (dateTo)   result = result.filter((tx) => tx.transaction_date <= dateTo);
     return result as unknown as TData[];
-  }, [data, filterVendor, filterCategory, filterTaxDeductible, filterCategorized, dateFrom, dateTo]);
+  }, [data, filterVendor, filterCategory, filterProject, filterTaxDeductible, filterCategorized, dateFrom, dateTo]);
 
   const openPanel = useCallback((tx: Transaction) => {
     setPanelTx(tx);
@@ -189,13 +192,13 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
   }, [table, focusedIndex, panelOpen, openPanel]);
 
   const activeFilterCount = [
-    filterVendor !== null, filterCategory !== null,
+    filterVendor !== null, filterCategory !== null, filterProject !== null,
     filterTaxDeductible !== null, filterCategorized !== null,
     !!dateFrom, !!dateTo,
   ].filter(Boolean).length;
 
   const clearFilters = () => {
-    setFilterVendor(null); setFilterCategory(null);
+    setFilterVendor(null); setFilterCategory(null); setFilterProject(null);
     setFilterTaxDeductible(null); setFilterCategorized(null);
     setDateFrom(""); setDateTo("");
   };
@@ -214,6 +217,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
           <div className="h-5 w-px bg-zinc-200 mx-1" />
           <FilterPill offLabel="Vendor"   onLabel="Has Vendor"   offOnLabel="No Vendor"       value={filterVendor}        onChange={setFilterVendor} />
           <FilterPill offLabel="Category" onLabel="Has Category" offOnLabel="No Category"     value={filterCategory}      onChange={setFilterCategory} />
+          <FilterPill offLabel="Project"  onLabel="Has Project"  offOnLabel="No Project"      value={filterProject}       onChange={setFilterProject} />
           <FilterPill offLabel="Tax"      onLabel="Tax Deductible" offOnLabel="Not Deductible" value={filterTaxDeductible} onChange={setFilterTaxDeductible} />
           <FilterPill offLabel="Status"   onLabel="Categorized" offOnLabel="Uncategorized"    value={filterCategorized}   onChange={setFilterCategorized} />
           {activeFilterCount > 0 && (

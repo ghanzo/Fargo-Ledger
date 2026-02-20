@@ -10,15 +10,21 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Upload } from "lucide-react";
 import { ImportDialog } from "@/components/import-dialog";
+import { useAccount } from "@/context/account-context";
 
 export default function Home() {
+  const { activeAccount } = useAccount();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading,      setLoading]      = useState(true);
+  const [loading,      setLoading]      = useState(false);
   const [importOpen,   setImportOpen]   = useState(false);
 
   const fetchData = async () => {
+    if (!activeAccount) return;
+    setLoading(true);
     try {
-      const response = await axios.get("http://localhost:8000/transactions");
+      const response = await axios.get(
+        `http://localhost:8000/transactions?account_id=${activeAccount.id}`
+      );
       setTransactions(response.data);
     } catch {
       toast.error("Failed to load transactions. Is the backend running?");
@@ -27,7 +33,9 @@ export default function Home() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+  }, [activeAccount]);
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans p-8">
@@ -52,18 +60,21 @@ export default function Home() {
       </header>
 
       <div className="bg-white rounded-xl border shadow-sm p-6">
-        {loading ? (
+        {transactions.length === 0 && loading ? (
           <div className="text-center py-16 text-zinc-400">Loading transactions...</div>
         ) : (
           <DataTable columns={columns} data={transactions} onRefresh={fetchData} />
         )}
       </div>
 
-      <ImportDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onSuccess={fetchData}
-      />
+      {activeAccount && (
+        <ImportDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          onSuccess={fetchData}
+          accountId={activeAccount.id}
+        />
+      )}
     </div>
   );
 }

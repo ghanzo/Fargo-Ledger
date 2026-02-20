@@ -19,6 +19,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useAccount } from "@/context/account-context";
 
 interface VendorComboboxProps {
   value: string;
@@ -29,19 +30,21 @@ export function VendorCombobox({ value, onChange }: VendorComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [vendors, setVendors] = React.useState<string[]>([]);
   const [inputValue, setInputValue] = React.useState("");
+  const { activeAccount } = useAccount();
 
   // Fetch existing vendors when component loads
   React.useEffect(() => {
+    if (!activeAccount) return;
     const fetchFacets = async () => {
       try {
-        const res = await axios.get("http://localhost:8000/facets");
+        const res = await axios.get(`http://localhost:8000/facets?account_id=${activeAccount.id}`);
         setVendors(res.data.vendors || []);
       } catch (err) {
         console.error("Failed to load vendors", err);
       }
     };
     fetchFacets();
-  }, []);
+  }, [activeAccount]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

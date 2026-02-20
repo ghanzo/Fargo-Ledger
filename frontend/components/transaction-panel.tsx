@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { VendorCombobox } from "@/components/vendor-combobox";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { ProjectCombobox } from "@/components/project-combobox";
 import { TagInput } from "@/components/tag-input";
 import { toast } from "sonner";
 
@@ -22,6 +23,7 @@ interface TransactionPanelProps {
 export function TransactionPanel({ transaction, open, onClose, onSave }: TransactionPanelProps) {
   const [vendor,       setVendor]       = useState("");
   const [category,     setCategory]     = useState("");
+  const [project,      setProject]      = useState("");
   const [notes,        setNotes]        = useState("");
   const [tags,         setTags]         = useState<string[]>([]);
   const [taxDeductible,setTaxDeductible]= useState(false);
@@ -34,6 +36,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
 
     setVendor(transaction.vendor || "");
     setCategory(transaction.category || "");
+    setProject(transaction.project || "");
     setNotes(transaction.notes || "");
     setTags(transaction.tags || []);
     setTaxDeductible(transaction.tax_deductible ?? false);
@@ -71,6 +74,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
       await axios.put(`http://localhost:8000/transactions/${transaction.id}`, {
         vendor:        vendor   || null,
         category:      category || null,
+        project:       project  || null,
         notes:         notes    || null,
         tags:          tags.length > 0 ? tags : null,
         tax_deductible: taxDeductible,
@@ -174,6 +178,10 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
             <div>
               <Label className="text-xs text-zinc-500 mb-1.5 block">Vendor</Label>
               <VendorCombobox value={vendor} onChange={setVendor} />
+            </div>
+            <div>
+              <Label className="text-xs text-zinc-500 mb-1.5 block">Project</Label>
+              <ProjectCombobox value={project} onChange={setProject} />
             </div>
             <div>
               <Label className="text-xs text-zinc-500 mb-1.5 block">Category</Label>

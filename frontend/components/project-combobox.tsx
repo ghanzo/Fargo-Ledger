@@ -21,26 +21,26 @@ import {
 } from "@/components/ui/popover";
 import { useAccount } from "@/context/account-context";
 
-interface CategoryComboboxProps {
+interface ProjectComboboxProps {
   value: string;
   onChange: (value: string) => void;
 }
 
-export function CategoryCombobox({ value, onChange }: CategoryComboboxProps) {
+export function ProjectCombobox({ value, onChange }: ProjectComboboxProps) {
   const [open, setOpen] = React.useState(false);
-  const [categories, setCategories] = React.useState<string[]>([]);
+  const [projects, setProjects] = React.useState<string[]>([]);
   const [inputValue, setInputValue] = React.useState("");
   const { activeAccount } = useAccount();
 
-  // Refresh category list every time the popover opens
+  // Refresh project list every time the popover opens
   React.useEffect(() => {
     if (!open || !activeAccount) return;
     const fetchFacets = async () => {
       try {
         const res = await axios.get(`http://localhost:8000/facets?account_id=${activeAccount.id}`);
-        setCategories(res.data.categories || []);
+        setProjects(res.data.projects || []);
       } catch (err) {
-        console.error("Failed to load categories", err);
+        console.error("Failed to load projects", err);
       }
     };
     fetchFacets();
@@ -55,14 +55,14 @@ export function CategoryCombobox({ value, onChange }: CategoryComboboxProps) {
           aria-expanded={open}
           className="w-full justify-between"
         >
-          {value || "Select or type category..."}
+          {value || "Select or type project..."}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-full p-0">
         <Command>
           <CommandInput
-            placeholder="Search or create category..."
+            placeholder="Search or create project..."
             onValueChange={setInputValue}
           />
           <CommandList>
@@ -76,14 +76,14 @@ export function CategoryCombobox({ value, onChange }: CategoryComboboxProps) {
                   }
                 }}
               >
-                {inputValue.trim() ? `Create: "${inputValue.trim()}"` : "Type to create a new category"}
+                {inputValue.trim() ? `Create: "${inputValue.trim()}"` : "Type to create a new project"}
               </div>
             </CommandEmpty>
             <CommandGroup>
-              {categories.map((cat) => (
+              {projects.map((proj) => (
                 <CommandItem
-                  key={cat}
-                  value={cat}
+                  key={proj}
+                  value={proj}
                   onSelect={(currentValue) => {
                     onChange(currentValue === value ? "" : currentValue);
                     setOpen(false);
@@ -92,10 +92,10 @@ export function CategoryCombobox({ value, onChange }: CategoryComboboxProps) {
                   <Check
                     className={cn(
                       "mr-2 h-4 w-4",
-                      value === cat ? "opacity-100" : "opacity-0"
+                      value === proj ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  {cat}
+                  {proj}
                 </CommandItem>
               ))}
             </CommandGroup>

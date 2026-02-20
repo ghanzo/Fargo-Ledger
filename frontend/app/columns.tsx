@@ -101,7 +101,30 @@ export const columns: ColumnDef<Transaction>[] = [
       );
     },
   },
-  // 4. DESCRIPTION
+  // 4. PROJECT
+  {
+    accessorKey: "project",
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+      >
+        Project
+        <ArrowUpDown className="ml-2 h-4 w-4" />
+      </Button>
+    ),
+    cell: ({ row }) => {
+      const project = row.getValue("project") as string;
+      return project ? (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">
+          {project}
+        </span>
+      ) : (
+        <span className="text-zinc-300 text-xs">—</span>
+      );
+    },
+  },
+  // 5. DESCRIPTION
   {
     accessorKey: "description",
     header: "Description",

@@ -2,11 +2,24 @@ from pydantic import BaseModel
 from datetime import date
 from typing import Optional, List
 
+# ── Account schemas ────────────────────────────────────────────────────────
+
+class AccountCreate(BaseModel):
+    name: str
+
+class AccountResponse(BaseModel):
+    id:   int
+    name: str
+
+    class Config:
+        from_attributes = True
+
 # ── Transaction schemas ────────────────────────────────────────────────────
 
 class TransactionUpdate(BaseModel):
     category:       Optional[str]       = None
     vendor:         Optional[str]       = None
+    project:        Optional[str]       = None
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
@@ -21,6 +34,7 @@ class TransactionRestore(BaseModel):
     id:             str
     vendor:         Optional[str]       = None
     category:       Optional[str]       = None
+    project:        Optional[str]       = None
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
@@ -28,12 +42,14 @@ class TransactionRestore(BaseModel):
 
 class TransactionResponse(BaseModel):
     id:               str
+    account_id:       int
     transaction_date: date
     description:      str
     amount:           float
     source_file:      str
     category:         Optional[str]       = None
     vendor:           Optional[str]       = None
+    project:          Optional[str]       = None
     notes:            Optional[str]       = None
     tags:             Optional[List[str]] = None
     tax_deductible:   Optional[bool]      = None
@@ -53,6 +69,7 @@ class BudgetUpdate(BaseModel):
 
 class BudgetResponse(BaseModel):
     id:            int
+    account_id:    int
     category:      str
     monthly_limit: float
 

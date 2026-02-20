@@ -5,6 +5,7 @@ export interface Transaction {
   amount: number;
   category: string | null;
   vendor: string | null;
+  project: string | null;
   notes: string | null;
   tags: string[] | null;
   tax_deductible: boolean | null;

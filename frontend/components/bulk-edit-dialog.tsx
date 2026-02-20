@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { VendorCombobox } from "@/components/vendor-combobox";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { ProjectCombobox } from "@/components/project-combobox";
 import { TagInput } from "@/components/tag-input";
 import { Transaction } from "@/types/transaction";
+import { useAccount } from "@/context/account-context";
 
 interface BulkEditDialogProps {
   selectedIds: string[];
@@ -25,13 +27,15 @@ export function BulkEditDialog({
 }: BulkEditDialogProps) {
   const [vendor,        setVendor]        = useState("");
   const [category,      setCategory]      = useState("");
+  const [project,       setProject]       = useState("");
   const [notes,         setNotes]         = useState("");
   const [tags,          setTags]          = useState<string[]>([]);
   const [taxDeductible, setTaxDeductible] = useState<boolean | null>(null);
   const [loading,       setLoading]       = useState(false);
+  const { activeAccount } = useAccount();
 
   const reset = () => {
-    setVendor(""); setCategory(""); setNotes(""); setTags([]); setTaxDeductible(null);
+    setVendor(""); setCategory(""); setProject(""); setNotes(""); setTags([]); setTaxDeductible(null);
   };
 
   const handleSave = async () => {
@@ -41,6 +45,7 @@ export function BulkEditDialog({
       id:             tx.id,
       vendor:         tx.vendor,
       category:       tx.category,
+      project:        tx.project,
       notes:          tx.notes,
       tags:           tx.tags,
       tax_deductible: tx.tax_deductible,
@@ -51,15 +56,16 @@ export function BulkEditDialog({
       const updateData: any = {};
       if (vendor)            updateData.vendor         = vendor;
       if (category)          updateData.category       = category;
+      if (project)           updateData.project        = project;
       if (notes)             updateData.notes          = notes;
       if (tags.length > 0)   updateData.tags           = tags;
       if (taxDeductible !== null) updateData.tax_deductible = taxDeductible;
       updateData.is_cleaned = true;
 
-      await axios.patch("http://localhost:8000/transactions/bulk", {
-        ids: selectedIds,
-        update_data: updateData,
-      });
+      await axios.patch(
+        `http://localhost:8000/transactions/bulk?account_id=${activeAccount?.id}`,
+        { ids: selectedIds, update_data: updateData },
+      );
 
       const count = selectedIds.length;
       onSuccess();
@@ -112,6 +118,11 @@ export function BulkEditDialog({
           <div className="grid gap-2">
             <Label>Category</Label>
             <CategoryCombobox value={category} onChange={setCategory} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Project</Label>
+            <ProjectCombobox value={project} onChange={setProject} />
           </div>
 
           <div className="grid gap-2">

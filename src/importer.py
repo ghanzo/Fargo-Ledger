@@ -17,7 +17,7 @@ def generate_base_hash(date_str: str, desc: str, amount: float) -> str:
     return hashlib.sha256(unique_string.encode("utf-8")).hexdigest()
 
 
-def import_csv_content(content: bytes, source_file: str, db: Session) -> dict:
+def import_csv_content(content: bytes, source_file: str, db: Session, account_id: int) -> dict:
     """
     Parse Wells Fargo CSV bytes and insert new transactions into the database.
     Returns {"imported": N, "skipped": N}.
@@ -55,6 +55,7 @@ def import_csv_content(content: bytes, source_file: str, db: Session) -> dict:
 
         db.add(Transaction(
             id=tx_id,
+            account_id=account_id,
             transaction_date=t_date,
             description=desc,
             amount=amount,

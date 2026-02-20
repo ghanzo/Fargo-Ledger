@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from src.models import Base
 
 # Fetch URL from Docker Environment Variables
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/finance_db")
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

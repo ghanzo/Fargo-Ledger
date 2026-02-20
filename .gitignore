@@ -1,0 +1,26 @@
+# ── Personal data ───────────────────────────────────────────────────────────
+data/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# ── Node / Next.js ───────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.*
+
+# ── Claude Code session data ─────────────────────────────────────────────────
+.claude/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

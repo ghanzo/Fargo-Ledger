@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: finance_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    # CHANGED: Start the Web Server instead of sleeping
+    command: uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/finance_db
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    ports:
+      # CHANGED: Expose the API port
+      - "8000:8000"
+
+volumes:
+  postgres_data:

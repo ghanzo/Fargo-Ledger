@@ -187,26 +187,31 @@ export default function ReportPage() {
     if (!content) return;
     setSaving(true);
     try {
-      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      const [{ default: jsPDF }, { toPng }] = await Promise.all([
         import("jspdf"),
-        import("html2canvas"),
+        import("html-to-image"),
       ]);
 
-      const canvas = await html2canvas(content, { scale: 2, useCORS: true, logging: false });
-      const imgData = canvas.toDataURL("image/png");
+      // html-to-image uses SVG foreignObject so the browser renders CSS natively —
+      // no JS-side color parsing, so oklch/lab (Tailwind 4) work fine.
+      const dataUrl = await toPng(content, { pixelRatio: 2, backgroundColor: "#ffffff" });
 
-      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise<void>((res) => { img.onload = () => res(); });
+
+      const pdf    = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
       const pageW  = pdf.internal.pageSize.getWidth();
       const pageH  = pdf.internal.pageSize.getHeight();
       const imgW   = pageW;
-      const imgH   = (canvas.height * pageW) / canvas.width;
+      const imgH   = (img.height * pageW) / img.width;
 
       let y = 0;
       let remaining = imgH;
       let page = 0;
       while (remaining > 0) {
         if (page > 0) pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, -y, imgW, imgH);
+        pdf.addImage(dataUrl, "PNG", 0, -y, imgW, imgH);
         y         += pageH;
         remaining -= pageH;
         page++;

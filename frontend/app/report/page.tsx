@@ -5,7 +5,7 @@ import axios from "axios";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
 import { Button } from "@/components/ui/button";
-import { Printer, ChevronLeft, ChevronRight } from "lucide-react";
+import { Printer, Download, ChevronLeft, ChevronRight } from "lucide-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,7 @@ export default function ReportPage() {
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading,      setLoading]      = useState(false);
+  const [saving,       setSaving]       = useState(false);
 
   // Derive date range from current mode
   const { dateFrom, dateTo, periodLabel } = useMemo(() => {
@@ -179,6 +180,44 @@ export default function ReportPage() {
     year: "numeric", month: "long", day: "numeric",
   });
 
+  // ── Save as PDF ─────────────────────────────────────────────────────────────
+
+  const saveReport = async () => {
+    const content = document.getElementById("report-content");
+    if (!content) return;
+    setSaving(true);
+    try {
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import("jspdf"),
+        import("html2canvas"),
+      ]);
+
+      const canvas = await html2canvas(content, { scale: 2, useCORS: true, logging: false });
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const pageW  = pdf.internal.pageSize.getWidth();
+      const pageH  = pdf.internal.pageSize.getHeight();
+      const imgW   = pageW;
+      const imgH   = (canvas.height * pageW) / canvas.width;
+
+      let y = 0;
+      let remaining = imgH;
+      let page = 0;
+      while (remaining > 0) {
+        if (page > 0) pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, -y, imgW, imgH);
+        y         += pageH;
+        remaining -= pageH;
+        page++;
+      }
+
+      pdf.save(`report-${periodLabel.replace(/\s+/g, "-")}.pdf`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -230,7 +269,11 @@ export default function ReportPage() {
         )}
 
         {loading && <span className="text-xs text-zinc-400">Loading...</span>}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={saveReport} disabled={saving} className="gap-2">
+            <Download className="h-4 w-4" />
+            {saving ? "Saving..." : "Save PDF"}
+          </Button>
           <Button size="sm" onClick={() => window.print()} className="gap-2">
             <Printer className="h-4 w-4" />
             Print Report
@@ -239,7 +282,7 @@ export default function ReportPage() {
       </div>
 
       {/* ── Report content ───────────────────────────────────────────── */}
-      <div className="max-w-4xl mx-auto py-8 px-6 print:py-0 print:px-0 print:max-w-none">
+      <div id="report-content" className="max-w-4xl mx-auto py-8 px-6 print:py-0 print:px-0 print:max-w-none">
         {/* Header */}
         <div className="mb-6 print:mb-4">
           <h1 className="text-2xl font-bold text-zinc-900 print:text-xl">Finance Report</h1>

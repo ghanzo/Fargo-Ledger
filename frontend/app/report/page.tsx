@@ -276,18 +276,15 @@ export default function ReportPage() {
 
         {/* 1. HEADER */}
         <div className="mb-8">
-          <h1 className="text-xl font-bold tracking-widest text-zinc-900 uppercase">Finance Report</h1>
-          <div className="mt-1 text-sm text-zinc-600 flex flex-wrap gap-x-6 gap-y-0.5">
-            <span>Account: <strong>{activeAccount?.name ?? "—"}</strong></span>
-            <span>Year: <strong>{year}</strong></span>
-            <span>Generated: <strong>{generatedDate}</strong></span>
-          </div>
+          <h1 className="text-3xl font-bold text-zinc-900">{activeAccount?.name ?? "—"}</h1>
+          <h2 className="text-lg font-bold text-zinc-800 mt-1">Income Statement for {year}</h2>
+          <div className="mt-2 text-xs text-zinc-400">Generated: {generatedDate}</div>
           <div className="mt-3 border-b-2 border-zinc-900" />
         </div>
 
         {/* 2. SUMMARY TABLE */}
         <section className="mb-10">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Summary</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-3">Properties</h2>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-zinc-300">
@@ -383,7 +380,7 @@ export default function ReportPage() {
 
                   {/* NET INCOME */}
                   <div className="border-t-2 border-zinc-400 pt-2 flex justify-between items-center">
-                    <span className="font-bold text-zinc-900">Net Income</span>
+                    <span className="font-bold text-zinc-900">Net Income {prop.label}</span>
                     <span className={`font-bold tabular-nums text-sm ${prop.net >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                       {prop.net >= 0 ? fmt(prop.net) : `(${fmt(prop.net)})`}
                     </span>
@@ -396,7 +393,7 @@ export default function ReportPage() {
 
         {/* 4. RECONCILIATION */}
         <section className="print:break-inside-avoid">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Reconciliation</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-3">Reconciliation</h2>
           <div className="border-t border-b border-zinc-300 py-3 space-y-1.5 text-sm">
             <div className="flex justify-between">
               <span className="text-zinc-600">Beginning Balance (Jan 1, {year})</span>

@@ -192,16 +192,31 @@ export default function ReportPage() {
         import("html-to-image"),
       ]);
 
-      // toCanvas gives us canvas.width / canvas.height as exact pixel counts —
-      // no intermediate Image element whose .width/.height can lie about scale.
-      // We also pin the render width so the output is viewport-independent.
-      const canvas = await toCanvas(content, {
-        pixelRatio: 2,
-        backgroundColor: "#ffffff",
-        style: { maxWidth: "none", width: `${content.offsetWidth}px` },
-      });
-      const dataUrl = canvas.toDataURL("image/png");
+      // Render into an off-screen fixed-width container to avoid mx-auto
+      // centering artifacts: when the content div is centered on-screen,
+      // html-to-image's foreignObject can include the left margin as blank
+      // space, shifting all content to the right in the output canvas.
+      const RENDER_WIDTH = 900;
+      const wrapper = document.createElement("div");
+      wrapper.style.cssText = `position:fixed;left:-9999px;top:0;width:${RENDER_WIDTH}px;background:#fff;`;
+      const clone = content.cloneNode(true) as HTMLElement;
+      clone.style.margin = "0";
+      clone.style.maxWidth = "none";
+      clone.style.width = `${RENDER_WIDTH}px`;
+      wrapper.appendChild(clone);
+      document.body.appendChild(wrapper);
 
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = await toCanvas(wrapper, {
+          pixelRatio: 2,
+          backgroundColor: "#ffffff",
+        });
+      } finally {
+        document.body.removeChild(wrapper);
+      }
+
+      const dataUrl = canvas.toDataURL("image/png");
       const pdf    = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
       const pageW  = pdf.internal.pageSize.getWidth();
       const pageH  = pdf.internal.pageSize.getHeight();

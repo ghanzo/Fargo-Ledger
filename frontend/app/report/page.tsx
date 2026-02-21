@@ -192,37 +192,72 @@ export default function ReportPage() {
         import("html-to-image"),
       ]);
 
-      // html-to-image inlines all computed styles into the SVG foreignObject.
-      // mx-auto auto-margins are computed as pixel values (e.g. margin-left:272px)
-      // and get inlined, which shifts the content right within the foreignObject.
-      // Overriding margin:"0" in the style option clears this before inlining,
-      // ensuring content starts at x=0 in the canvas output.
+      // html-to-image inlines computed styles: mx-auto computes to pixel margin
+      // values which shift content right. Override margin:"0" to clear this.
       const canvas = await toCanvas(content, {
         pixelRatio: 2,
         backgroundColor: "#ffffff",
-        style: {
-          margin: "0",
-          maxWidth: "none",
-          width: `${content.scrollWidth}px`,
-        },
+        style: { margin: "0", maxWidth: "none", width: `${content.scrollWidth}px` },
       });
 
-      const dataUrl = canvas.toDataURL("image/png");
-      const pdf    = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-      const pageW  = pdf.internal.pageSize.getWidth();
-      const pageH  = pdf.internal.pageSize.getHeight();
-      const imgW   = pageW;
-      const imgH   = (canvas.height * pageW) / canvas.width;
+      const pdf   = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();   // 595pt
+      const pageH = pdf.internal.pageSize.getHeight();  // 842pt
+      const MX    = 40;  // horizontal margin (pt) ~14mm
+      const MY    = 48;  // vertical margin (pt)   ~17mm
+      const cW    = pageW - 2 * MX;  // content width
+      const cH    = pageH - 2 * MY;  // content height per page
+      const scale = cW / canvas.width; // canvas px → pt
 
-      let y = 0;
-      let remaining = imgH;
-      let page = 0;
-      while (remaining > 0) {
-        if (page > 0) pdf.addPage();
-        pdf.addImage(dataUrl, "PNG", 0, -y, imgW, imgH);
-        y         += pageH;
-        remaining -= pageH;
-        page++;
+      // Scan a single canvas row; return true if it is entirely (near-)white.
+      const ctx = canvas.getContext("2d")!;
+      const isWhiteRow = (row: number): boolean => {
+        const px = ctx.getImageData(0, row, canvas.width, 1).data;
+        for (let i = 0; i < px.length; i += 4) {
+          if (px[i] < 238 || px[i + 1] < 238 || px[i + 2] < 238) return false;
+        }
+        return true;
+      };
+
+      // Find the nearest white row within ±searchPx of targetRow so we never
+      // cut through a line of text. Searches upward first (prefer cutting after
+      // a section ends rather than before a new one starts).
+      const findCutRow = (target: number, searchPx = 150): number => {
+        for (let d = 0; d <= searchPx; d++) {
+          if (target - d >= 0            && isWhiteRow(target - d)) return target - d;
+          if (target + d < canvas.height && isWhiteRow(target + d)) return target + d;
+        }
+        return target; // fallback: cut here anyway
+      };
+
+      // Build page cut points (in canvas pixels).
+      const pageHeightPx = Math.round(cH / scale);
+      const cuts: number[] = [0];
+      let nextTarget = pageHeightPx;
+      while (nextTarget < canvas.height) {
+        const cut = findCutRow(nextTarget);
+        // Guard: always advance so we don't loop forever on dense content.
+        cuts.push(Math.max(cut, cuts[cuts.length - 1] + 1));
+        nextTarget = cuts[cuts.length - 1] + pageHeightPx;
+      }
+      cuts.push(canvas.height);
+
+      // Render each slice onto its own PDF page with margins.
+      for (let i = 0; i < cuts.length - 1; i++) {
+        if (i > 0) pdf.addPage();
+        const y0 = cuts[i];
+        const y1 = cuts[i + 1];
+        const sliceH = y1 - y0;
+
+        const slice = document.createElement("canvas");
+        slice.width  = canvas.width;
+        slice.height = sliceH;
+        const sCtx = slice.getContext("2d")!;
+        sCtx.fillStyle = "#ffffff";
+        sCtx.fillRect(0, 0, slice.width, slice.height);
+        sCtx.drawImage(canvas, 0, y0, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+        pdf.addImage(slice.toDataURL("image/png"), "PNG", MX, MY, cW, sliceH * scale);
       }
 
       pdf.save(`report-${periodLabel.replace(/\s+/g, "-")}.pdf`);

@@ -187,24 +187,26 @@ export default function ReportPage() {
     if (!content) return;
     setSaving(true);
     try {
-      const [{ default: jsPDF }, { toPng }] = await Promise.all([
+      const [{ default: jsPDF }, { toCanvas }] = await Promise.all([
         import("jspdf"),
         import("html-to-image"),
       ]);
 
-      // html-to-image uses SVG foreignObject so the browser renders CSS natively —
-      // no JS-side color parsing, so oklch/lab (Tailwind 4) work fine.
-      const dataUrl = await toPng(content, { pixelRatio: 2, backgroundColor: "#ffffff" });
-
-      const img = new Image();
-      img.src = dataUrl;
-      await new Promise<void>((res) => { img.onload = () => res(); });
+      // toCanvas gives us canvas.width / canvas.height as exact pixel counts —
+      // no intermediate Image element whose .width/.height can lie about scale.
+      // We also pin the render width so the output is viewport-independent.
+      const canvas = await toCanvas(content, {
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        style: { maxWidth: "none", width: `${content.offsetWidth}px` },
+      });
+      const dataUrl = canvas.toDataURL("image/png");
 
       const pdf    = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
       const pageW  = pdf.internal.pageSize.getWidth();
       const pageH  = pdf.internal.pageSize.getHeight();
       const imgW   = pageW;
-      const imgH   = (img.height * pageW) / img.width;
+      const imgH   = (canvas.height * pageW) / canvas.width;
 
       let y = 0;
       let remaining = imgH;

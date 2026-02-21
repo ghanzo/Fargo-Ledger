@@ -27,6 +27,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
   const [notes,        setNotes]        = useState("");
   const [tags,         setTags]         = useState<string[]>([]);
   const [taxDeductible,setTaxDeductible]= useState(false);
+  const [isTransfer,   setIsTransfer]   = useState(false);
   const [loading,      setLoading]      = useState(false);
   const [suggestion,   setSuggestion]   = useState<{ vendor: string | null; category: string | null } | null>(null);
 
@@ -40,6 +41,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     setNotes(transaction.notes || "");
     setTags(transaction.tags || []);
     setTaxDeductible(transaction.tax_deductible ?? false);
+    setIsTransfer(transaction.is_transfer ?? false);
     setSuggestion(null);
 
     // Only fetch suggestions for uncategorized transactions
@@ -78,6 +80,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
         notes:         notes    || null,
         tags:          tags.length > 0 ? tags : null,
         tax_deductible: taxDeductible,
+        is_transfer:   isTransfer,
         is_cleaned:    true,
       });
       toast.success("Transaction saved");
@@ -209,6 +212,18 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
               />
               <Label htmlFor="panel-tax" className="cursor-pointer text-sm font-normal">
                 Tax Deductible
+              </Label>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="panel-transfer"
+                checked={isTransfer}
+                onChange={(e) => setIsTransfer(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300 cursor-pointer"
+              />
+              <Label htmlFor="panel-transfer" className="cursor-pointer text-sm font-normal">
+                Transfer — exclude from income &amp; expenses
               </Label>
             </div>
           </div>

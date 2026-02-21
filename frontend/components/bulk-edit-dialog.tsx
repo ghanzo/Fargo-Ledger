@@ -31,11 +31,12 @@ export function BulkEditDialog({
   const [notes,         setNotes]         = useState("");
   const [tags,          setTags]          = useState<string[]>([]);
   const [taxDeductible, setTaxDeductible] = useState<boolean | null>(null);
+  const [isTransfer,    setIsTransfer]    = useState<boolean | null>(null);
   const [loading,       setLoading]       = useState(false);
   const { activeAccount } = useAccount();
 
   const reset = () => {
-    setVendor(""); setCategory(""); setProject(""); setNotes(""); setTags([]); setTaxDeductible(null);
+    setVendor(""); setCategory(""); setProject(""); setNotes(""); setTags([]); setTaxDeductible(null); setIsTransfer(null);
   };
 
   const handleSave = async () => {
@@ -49,6 +50,7 @@ export function BulkEditDialog({
       notes:          tx.notes,
       tags:           tx.tags,
       tax_deductible: tx.tax_deductible,
+      is_transfer:    tx.is_transfer,
       is_cleaned:     tx.is_cleaned,
     }));
 
@@ -60,6 +62,7 @@ export function BulkEditDialog({
       if (notes)             updateData.notes          = notes;
       if (tags.length > 0)   updateData.tags           = tags;
       if (taxDeductible !== null) updateData.tax_deductible = taxDeductible;
+      if (isTransfer    !== null) updateData.is_transfer    = isTransfer;
       updateData.is_cleaned = true;
 
       await axios.patch(
@@ -153,6 +156,30 @@ export function BulkEditDialog({
                   onClick={() => setTaxDeductible(val)}
                   className={`text-xs px-3 py-1 rounded border transition-colors ${
                     taxDeductible === val
+                      ? activeClass
+                      : "border-zinc-200 text-zinc-500 hover:border-zinc-400"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Label>Transfer</Label>
+            <div className="flex gap-2">
+              {([
+                [null,  "No Change", "bg-zinc-900 text-white border-zinc-900"],
+                [true,  "Yes",       "bg-zinc-500 text-white border-zinc-500"],
+                [false, "No",        "bg-red-500 text-white border-red-500"],
+              ] as const).map(([val, label, activeClass]) => (
+                <button
+                  key={String(val)}
+                  type="button"
+                  onClick={() => setIsTransfer(val)}
+                  className={`text-xs px-3 py-1 rounded border transition-colors ${
+                    isTransfer === val
                       ? activeClass
                       : "border-zinc-200 text-zinc-500 hover:border-zinc-400"
                   }`}

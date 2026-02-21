@@ -38,6 +38,7 @@ class Transaction(Base):
     notes = Column(String, nullable=True)        # e.g. "Meeting with Client X"
     tags = Column(JSON, nullable=True)           # e.g. ["Thailand 2025", "Project A"]
     tax_deductible = Column(Boolean, default=False, nullable=True)  # True if tax deductible
+    is_transfer = Column(Boolean, default=False)                     # True if bank transfer (excluded from P&L)
 
     # Status Flags
     is_cleaned = Column(Boolean, default=False)  # True if categorized/processed

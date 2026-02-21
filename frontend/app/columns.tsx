@@ -173,13 +173,21 @@ export const columns: ColumnDef<Transaction>[] = [
     ),
     cell: ({ row }) => {
       const amount = parseFloat(row.getValue("amount"));
+      const isTransfer = row.original.is_transfer;
       const formatted = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
       }).format(Math.abs(amount));
       return (
-        <div className={`text-right font-medium text-sm ${amount > 0 ? "text-emerald-600" : ""}`}>
-          {amount > 0 ? "+" : ""}{formatted}
+        <div className="text-right">
+          {isTransfer && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-500 mr-1.5">
+              Transfer
+            </span>
+          )}
+          <span className={`font-medium text-sm ${!isTransfer && amount > 0 ? "text-emerald-600" : ""}`}>
+            {amount > 0 ? "+" : ""}{formatted}
+          </span>
         </div>
       );
     },

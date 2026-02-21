@@ -23,6 +23,7 @@ class TransactionUpdate(BaseModel):
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
+    is_transfer:    Optional[bool]      = None
     is_cleaned:     Optional[bool]      = None
 
 class TransactionBulkUpdate(BaseModel):
@@ -38,6 +39,7 @@ class TransactionRestore(BaseModel):
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
+    is_transfer:    Optional[bool]      = None
     is_cleaned:     bool                = False
 
 class TransactionResponse(BaseModel):
@@ -53,6 +55,7 @@ class TransactionResponse(BaseModel):
     notes:            Optional[str]       = None
     tags:             Optional[List[str]] = None
     tax_deductible:   Optional[bool]      = None
+    is_transfer:      bool                = False
     is_cleaned:       bool
 
     class Config:

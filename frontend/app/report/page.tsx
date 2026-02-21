@@ -5,6 +5,7 @@ import axios from "axios";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Printer, Download, ChevronLeft, ChevronRight } from "lucide-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -14,33 +15,23 @@ const API = "http://localhost:8000";
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(n));
 
-const fmtSigned = (n: number) => (n >= 0 ? "+" : "−") + fmt(n);
-
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-function monthLabel(year: number, month: number) {
-  return `${MONTH_NAMES[month - 1]} ${year}`;
-}
+const fmtParen = (n: number) =>
+  n < 0 ? `(${fmt(n)})` : fmt(n);
 
 // ── Aggregation types ─────────────────────────────────────────────────────────
 
-interface VendorAgg {
+interface CategoryLine {
   label: string;
-  income: number;
-  expenses: number;
-  count: number;
+  amount: number;
 }
 
-interface ProjectAgg {
+interface PropertyAgg {
   label: string;
-  income: number;
-  expenses: number;
-  vendors: Map<string, VendorAgg>;
-  // detail tree: category → vendor → Transaction[]
-  detail: Map<string, Map<string, Transaction[]>>;
+  income: CategoryLine[];
+  expenses: CategoryLine[];
+  totalIncome: number;
+  totalExpenses: number;
+  net: number;
 }
 
 // ── Report Page ───────────────────────────────────────────────────────────────
@@ -48,35 +39,17 @@ interface ProjectAgg {
 export default function ReportPage() {
   const { activeAccount } = useAccount();
 
-  // Period selector
   const today = new Date();
-  const [periodMode, setPeriodMode] = useState<"month" | "year">("month");
-  const [year,       setYear]       = useState(today.getFullYear());
-  const [month,      setMonth]      = useState(today.getMonth() + 1);
-  const [reportYear, setReportYear] = useState(today.getFullYear());
+  const [year,             setYear]             = useState(today.getFullYear());
+  const [transactions,     setTransactions]     = useState<Transaction[]>([]);
+  const [loading,          setLoading]          = useState(false);
+  const [saving,           setSaving]           = useState(false);
+  const [beginningBalance, setBeginningBalance] = useState("");
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading,      setLoading]      = useState(false);
-  const [saving,       setSaving]       = useState(false);
+  const dateFrom = `${year}-01-01`;
+  const dateTo   = `${year}-12-31`;
 
-  // Derive date range from current mode
-  const { dateFrom, dateTo, periodLabel } = useMemo(() => {
-    if (periodMode === "year") {
-      return {
-        dateFrom:    `${reportYear}-01-01`,
-        dateTo:      `${reportYear}-12-31`,
-        periodLabel: String(reportYear),
-      };
-    }
-    const lastDay = new Date(year, month, 0).getDate();
-    return {
-      dateFrom:    `${year}-${String(month).padStart(2, "0")}-01`,
-      dateTo:      `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
-      periodLabel: monthLabel(year, month),
-    };
-  }, [periodMode, year, month, reportYear]);
-
-  // Fetch transactions when period or account changes
+  // Fetch transactions when year or account changes
   useEffect(() => {
     if (!activeAccount) return;
     setLoading(true);
@@ -89,92 +62,90 @@ export default function ReportPage() {
       .finally(() => setLoading(false));
   }, [activeAccount, dateFrom, dateTo]);
 
-  const prevMonth = () => {
-    if (month === 1) { setYear((y) => y - 1); setMonth(12); }
-    else setMonth((m) => m - 1);
-  };
-  const nextMonth = () => {
-    if (month === 12) { setYear((y) => y + 1); setMonth(1); }
-    else setMonth((m) => m + 1);
-  };
-
   // ── Aggregations ────────────────────────────────────────────────────────────
 
-  const { summary, projectList } = useMemo(() => {
-    let totalIncome   = 0;
-    let totalExpenses = 0;
-    let taxDed        = 0;
+  const { propertyList, transfersIn, transfersOut, totalIncome, totalExpenses, netIncome } = useMemo(() => {
+    // Separate transfers from P&L transactions
+    let tIn  = 0;
+    let tOut = 0;
 
-    const projectMap = new Map<string, ProjectAgg>();
-
-    const getProject = (key: string, label: string): ProjectAgg => {
-      if (!projectMap.has(key)) {
-        projectMap.set(key, { label, income: 0, expenses: 0, vendors: new Map(), detail: new Map() });
-      }
-      return projectMap.get(key)!;
-    };
+    // Map: project key → category → amount
+    const projectIncomeMap  = new Map<string, Map<string, number>>();
+    const projectExpenseMap = new Map<string, Map<string, number>>();
 
     for (const tx of transactions) {
-      const amount  = parseFloat(String(tx.amount));
-      const isIncome = amount > 0;
+      const amount = parseFloat(String(tx.amount));
 
-      if (isIncome) totalIncome   += amount;
-      else          totalExpenses += Math.abs(amount);
-      if (tx.tax_deductible) taxDed += Math.abs(amount);
-
-      const projKey   = tx.project  || "__none__";
-      const projLabel = tx.project  || "(No Project)";
-      const vendKey   = tx.vendor   || "__novendor__";
-      const vendLabel = tx.vendor   || "(No Vendor)";
-      const catKey    = tx.category || "(No Category)";
-
-      const proj = getProject(projKey, projLabel);
-      if (isIncome) proj.income   += amount;
-      else          proj.expenses += Math.abs(amount);
-
-      // Vendor agg
-      if (!proj.vendors.has(vendKey)) {
-        proj.vendors.set(vendKey, { label: vendLabel, income: 0, expenses: 0, count: 0 });
+      if (tx.is_transfer) {
+        if (amount > 0) tIn  += amount;
+        else            tOut += Math.abs(amount);
+        continue; // exclude from P&L
       }
-      const vend = proj.vendors.get(vendKey)!;
-      if (isIncome) vend.income   += amount;
-      else          vend.expenses += Math.abs(amount);
-      vend.count++;
 
-      // Detail tree
-      if (!proj.detail.has(catKey)) proj.detail.set(catKey, new Map());
-      const catMap = proj.detail.get(catKey)!;
-      if (!catMap.has(vendKey)) catMap.set(vendKey, []);
-      catMap.get(vendKey)!.push(tx);
-    }
+      const projKey = tx.project || "__none__";
+      const catKey  = tx.category || "Uncategorized";
 
-    // Sort transactions within each vendor by date
-    for (const proj of projectMap.values()) {
-      for (const catMap of proj.detail.values()) {
-        for (const txList of catMap.values()) {
-          txList.sort((a, b) => a.transaction_date.localeCompare(b.transaction_date));
-        }
+      if (amount > 0) {
+        if (!projectIncomeMap.has(projKey))  projectIncomeMap.set(projKey, new Map());
+        const catMap = projectIncomeMap.get(projKey)!;
+        catMap.set(catKey, (catMap.get(catKey) ?? 0) + amount);
+      } else {
+        if (!projectExpenseMap.has(projKey)) projectExpenseMap.set(projKey, new Map());
+        const catMap = projectExpenseMap.get(projKey)!;
+        catMap.set(catKey, (catMap.get(catKey) ?? 0) + Math.abs(amount));
       }
     }
 
-    // Sort projects: most expenses first; (No Project) always last
-    const sorted = [...projectMap.entries()].sort(([ak, av], [bk, bv]) => {
+    // Build all project keys (union of income + expense projects)
+    const allKeys = new Set([...projectIncomeMap.keys(), ...projectExpenseMap.keys()]);
+
+    const list: [string, PropertyAgg][] = [];
+    for (const key of allKeys) {
+      const label = key === "__none__" ? "Other / Miscellaneous" : key;
+
+      const incomeLines: CategoryLine[] = [...(projectIncomeMap.get(key) ?? new Map()).entries()]
+        .map(([l, a]) => ({ label: l, amount: a }))
+        .sort((a, b) => b.amount - a.amount);
+
+      const expenseLines: CategoryLine[] = [...(projectExpenseMap.get(key) ?? new Map()).entries()]
+        .map(([l, a]) => ({ label: l, amount: a }))
+        .sort((a, b) => b.amount - a.amount);
+
+      const totalInc  = incomeLines.reduce((s, l) => s + l.amount, 0);
+      const totalExp  = expenseLines.reduce((s, l) => s + l.amount, 0);
+
+      list.push([key, {
+        label,
+        income:        incomeLines,
+        expenses:      expenseLines,
+        totalIncome:   totalInc,
+        totalExpenses: totalExp,
+        net:           totalInc - totalExp,
+      }]);
+    }
+
+    // Sort: alphabetical by project name, "Other / Miscellaneous" always last
+    list.sort(([ak, av], [bk, bv]) => {
       if (ak === "__none__") return 1;
       if (bk === "__none__") return -1;
-      return bv.expenses - av.expenses;
+      return av.label.localeCompare(bv.label);
     });
 
+    const totalInc  = list.reduce((s, [, p]) => s + p.totalIncome,   0);
+    const totalExp  = list.reduce((s, [, p]) => s + p.totalExpenses, 0);
+
     return {
-      summary: {
-        income:   totalIncome,
-        expenses: totalExpenses,
-        net:      totalIncome - totalExpenses,
-        taxDed,
-        count:    transactions.length,
-      },
-      projectList: sorted,
+      propertyList:  list,
+      transfersIn:   tIn,
+      transfersOut:  tOut,
+      totalIncome:   totalInc,
+      totalExpenses: totalExp,
+      netIncome:     totalInc - totalExp,
     };
   }, [transactions]);
+
+  const beginBal  = parseFloat(beginningBalance.replace(/[^0-9.-]/g, "")) || 0;
+  const endingBal = beginBal + netIncome + transfersIn - transfersOut;
 
   const generatedDate = new Date().toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
@@ -192,8 +163,6 @@ export default function ReportPage() {
         import("html-to-image"),
       ]);
 
-      // html-to-image inlines computed styles: mx-auto computes to pixel margin
-      // values which shift content right. Override margin:"0" to clear this.
       const canvas = await toCanvas(content, {
         pixelRatio: 2,
         backgroundColor: "#ffffff",
@@ -201,15 +170,14 @@ export default function ReportPage() {
       });
 
       const pdf   = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-      const pageW = pdf.internal.pageSize.getWidth();   // 595pt
-      const pageH = pdf.internal.pageSize.getHeight();  // 842pt
-      const MX    = 40;  // horizontal margin (pt) ~14mm
-      const MY    = 48;  // vertical margin (pt)   ~17mm
-      const cW    = pageW - 2 * MX;  // content width
-      const cH    = pageH - 2 * MY;  // content height per page
-      const scale = cW / canvas.width; // canvas px → pt
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const MX    = 40;
+      const MY    = 48;
+      const cW    = pageW - 2 * MX;
+      const cH    = pageH - 2 * MY;
+      const scale = cW / canvas.width;
 
-      // Scan a single canvas row; return true if it is entirely (near-)white.
       const ctx = canvas.getContext("2d")!;
       const isWhiteRow = (row: number): boolean => {
         const px = ctx.getImageData(0, row, canvas.width, 1).data;
@@ -219,30 +187,24 @@ export default function ReportPage() {
         return true;
       };
 
-      // Find the nearest white row within ±searchPx of targetRow so we never
-      // cut through a line of text. Searches upward first (prefer cutting after
-      // a section ends rather than before a new one starts).
       const findCutRow = (target: number, searchPx = 150): number => {
         for (let d = 0; d <= searchPx; d++) {
           if (target - d >= 0            && isWhiteRow(target - d)) return target - d;
           if (target + d < canvas.height && isWhiteRow(target + d)) return target + d;
         }
-        return target; // fallback: cut here anyway
+        return target;
       };
 
-      // Build page cut points (in canvas pixels).
       const pageHeightPx = Math.round(cH / scale);
       const cuts: number[] = [0];
       let nextTarget = pageHeightPx;
       while (nextTarget < canvas.height) {
         const cut = findCutRow(nextTarget);
-        // Guard: always advance so we don't loop forever on dense content.
         cuts.push(Math.max(cut, cuts[cuts.length - 1] + 1));
         nextTarget = cuts[cuts.length - 1] + pageHeightPx;
       }
       cuts.push(canvas.height);
 
-      // Render each slice onto its own PDF page with margins.
       for (let i = 0; i < cuts.length - 1; i++) {
         if (i > 0) pdf.addPage();
         const y0 = cuts[i];
@@ -260,7 +222,7 @@ export default function ReportPage() {
         pdf.addImage(slice.toDataURL("image/png"), "PNG", MX, MY, cW, sliceH * scale);
       }
 
-      pdf.save(`report-${periodLabel.replace(/\s+/g, "-")}.pdf`);
+      pdf.save(`finance-report-${year}.pdf`);
     } finally {
       setSaving(false);
     }
@@ -270,53 +232,32 @@ export default function ReportPage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 print:bg-white">
-      {/* ── Screen-only controls ─────────────────────────────────────── */}
-      <div className="print:hidden bg-white border-b px-8 py-3 flex items-center gap-4">
-        {/* Mode toggle */}
-        <div className="flex rounded-md border overflow-hidden text-xs">
-          {(["month", "year"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setPeriodMode(mode)}
-              className={`px-3 py-1.5 transition-colors ${
-                periodMode === mode
-                  ? "bg-zinc-900 text-white"
-                  : "text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50"
-              }`}
-            >
-              {mode === "month" ? "Month" : "Year"}
-            </button>
-          ))}
+      {/* ── Screen-only controls bar ───────────────────────────────── */}
+      <div className="print:hidden bg-white border-b px-8 py-3 flex items-center gap-4 flex-wrap">
+        {/* Year selector */}
+        <div className="flex items-center gap-1">
+          <button onClick={() => setYear((y) => y - 1)} className="p-1 rounded hover:bg-zinc-100">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm font-semibold w-[52px] text-center tabular-nums">{year}</span>
+          <button onClick={() => setYear((y) => y + 1)} className="p-1 rounded hover:bg-zinc-100">
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* Navigator */}
-        {periodMode === "month" ? (
-          <div className="flex items-center gap-1">
-            <button onClick={prevMonth} className="p-1 rounded hover:bg-zinc-100">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-sm font-medium w-[160px] text-center">
-              {monthLabel(year, month)}
-            </span>
-            <button onClick={nextMonth} className="p-1 rounded hover:bg-zinc-100">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1">
-            <button onClick={() => setReportYear((y) => y - 1)} className="p-1 rounded hover:bg-zinc-100">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-sm font-medium w-[60px] text-center">
-              {reportYear}
-            </span>
-            <button onClick={() => setReportYear((y) => y + 1)} className="p-1 rounded hover:bg-zinc-100">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+        {/* Beginning balance */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-zinc-500 whitespace-nowrap">Beginning Balance:</span>
+          <Input
+            className="w-36 h-8 text-sm"
+            placeholder="$0.00"
+            value={beginningBalance}
+            onChange={(e) => setBeginningBalance(e.target.value)}
+          />
+        </div>
 
         {loading && <span className="text-xs text-zinc-400">Loading...</span>}
+
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={saveReport} disabled={saving} className="gap-2">
             <Download className="h-4 w-4" />
@@ -329,154 +270,161 @@ export default function ReportPage() {
         </div>
       </div>
 
-      {/* ── Report content ───────────────────────────────────────────── */}
-      <div id="report-content" className="max-w-4xl mx-auto py-8 px-6 print:py-0 print:px-0 print:max-w-none">
-        {/* Header */}
-        <div className="mb-6 print:mb-4">
-          <h1 className="text-2xl font-bold text-zinc-900 print:text-xl">Finance Report</h1>
-          <div className="mt-1 text-sm text-zinc-500 flex flex-wrap gap-4 print:gap-6">
-            <span>Account: <strong className="text-zinc-700">{activeAccount?.name ?? "—"}</strong></span>
-            <span>Period: <strong className="text-zinc-700">{periodLabel}</strong></span>
-            <span>Generated: <strong className="text-zinc-700">{generatedDate}</strong></span>
+      {/* ── Report content ─────────────────────────────────────────── */}
+      <div id="report-content" className="max-w-4xl mx-auto py-8 px-6 print:py-0 print:px-0 print:max-w-none font-mono">
+
+        {/* 1. HEADER */}
+        <div className="mb-8">
+          <h1 className="text-xl font-bold tracking-widest text-zinc-900 uppercase">Finance Report</h1>
+          <div className="mt-1 text-sm text-zinc-600 flex flex-wrap gap-x-6 gap-y-0.5">
+            <span>Account: <strong>{activeAccount?.name ?? "—"}</strong></span>
+            <span>Year: <strong>{year}</strong></span>
+            <span>Generated: <strong>{generatedDate}</strong></span>
           </div>
-          <div className="mt-3 border-b-2 border-zinc-900 print:border-zinc-700" />
+          <div className="mt-3 border-b-2 border-zinc-900" />
         </div>
 
-        {/* ── OVERVIEW ─────────────────────────────────────────────── */}
-        <section className="mb-8 print:mb-6">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-3 print:text-zinc-500">
-            Overview
-          </h2>
-          <div className="border rounded-lg overflow-hidden print:rounded-none print:border-zinc-300">
-            <table className="w-full text-sm">
-              <tbody>
-                <OverviewRow label="Total Income"       value={fmt(summary.income)}        valueClass="text-emerald-700 font-semibold" />
-                <OverviewRow label="Total Expenses"     value={fmt(summary.expenses)}      valueClass="font-semibold" />
-                <OverviewRow label="Net"                value={fmtSigned(summary.net)}     valueClass={`font-bold ${summary.net >= 0 ? "text-emerald-700" : "text-red-600"}`} highlight />
-                <OverviewRow label="Tax Deductible"     value={fmt(summary.taxDed)}        />
-                <OverviewRow label="Total Transactions" value={String(summary.count)}      />
-              </tbody>
-            </table>
-          </div>
+        {/* 2. SUMMARY TABLE */}
+        <section className="mb-10">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Summary</h2>
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-zinc-300">
+                <th className="text-left pb-1.5 font-semibold text-zinc-700">Property</th>
+                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Income</th>
+                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Expenses</th>
+                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {propertyList.map(([key, prop]) => (
+                <tr key={key} className="border-b border-zinc-100">
+                  <td className="py-1.5 text-zinc-800">{prop.label}</td>
+                  <td className="py-1.5 text-right tabular-nums text-emerald-700">{fmt(prop.totalIncome)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-zinc-700">{prop.totalExpenses > 0 ? `(${fmt(prop.totalExpenses)})` : "—"}</td>
+                  <td className={`py-1.5 text-right tabular-nums font-medium ${prop.net >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                    {prop.net >= 0 ? fmt(prop.net) : `(${fmt(prop.net)})`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-zinc-400">
+                <td className="pt-2 font-bold text-zinc-900 uppercase tracking-wide text-xs">Total</td>
+                <td className="pt-2 text-right tabular-nums font-bold text-emerald-700">{fmt(totalIncome)}</td>
+                <td className="pt-2 text-right tabular-nums font-bold text-zinc-700">{totalExpenses > 0 ? `(${fmt(totalExpenses)})` : "—"}</td>
+                <td className={`pt-2 text-right tabular-nums font-bold ${netIncome >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                  {netIncome >= 0 ? fmt(netIncome) : `(${fmt(netIncome)})`}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
         </section>
 
-        {/* ── BY PROJECT ───────────────────────────────────────────── */}
-        <section className="mb-8 print:mb-6">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-3 print:text-zinc-500">
-            By Project
-          </h2>
-          <div className="space-y-4 print:space-y-3">
-            {projectList.length === 0 && (
-              <p className="text-sm text-zinc-400">No transactions in this period.</p>
-            )}
-            {projectList.map(([key, proj]) => (
-              <div key={key} className="border rounded-lg overflow-hidden print:rounded-none print:border-zinc-300 print:break-inside-avoid">
-                {/* Project header */}
-                <div className="bg-zinc-50 px-4 py-2.5 border-b print:bg-white print:border-zinc-300">
-                  <div className="flex items-baseline gap-3 flex-wrap">
-                    <span className="font-semibold text-sm text-zinc-900">{proj.label}</span>
-                    <span className="text-xs text-zinc-500">
-                      Income {fmt(proj.income)} · Expenses {fmt(proj.expenses)} · Net{" "}
-                      <span className={proj.income - proj.expenses >= 0 ? "text-emerald-700 font-medium" : "text-red-600 font-medium"}>
-                        {fmtSigned(proj.income - proj.expenses)}
-                      </span>
+        {/* 3. INCOME STATEMENTS — per property */}
+        <section className="mb-10">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4">Income Statements</h2>
+          <div className="space-y-8">
+            {propertyList.map(([key, prop]) => (
+              <div key={key} className="print:break-inside-avoid">
+                {/* Property heading */}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-1 h-5 bg-zinc-800 rounded-sm" />
+                  <span className="font-bold text-sm uppercase tracking-wide text-zinc-800">{prop.label}</span>
+                </div>
+
+                <div className="ml-4 space-y-4">
+                  {/* INCOME */}
+                  {prop.income.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">Income</div>
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {prop.income.map((line) => (
+                            <tr key={line.label}>
+                              <td className="py-0.5 pl-4 text-zinc-700">{line.label}</td>
+                              <td className="py-0.5 text-right tabular-nums text-emerald-700 w-36">{fmt(line.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-zinc-300">
+                            <td className="pt-1 pl-4 font-semibold text-zinc-800">Total Income</td>
+                            <td className="pt-1 text-right tabular-nums font-semibold text-emerald-700 w-36">{fmt(prop.totalIncome)}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* EXPENSES */}
+                  {prop.expenses.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">Expenses</div>
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {prop.expenses.map((line) => (
+                            <tr key={line.label}>
+                              <td className="py-0.5 pl-4 text-zinc-700">{line.label}</td>
+                              <td className="py-0.5 text-right tabular-nums text-zinc-700 w-36">({fmt(line.amount)})</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-zinc-300">
+                            <td className="pt-1 pl-4 font-semibold text-zinc-800">Total Expenses</td>
+                            <td className="pt-1 text-right tabular-nums font-semibold text-zinc-700 w-36">({fmt(prop.totalExpenses)})</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* NET INCOME */}
+                  <div className="border-t-2 border-zinc-400 pt-2 flex justify-between items-center">
+                    <span className="font-bold text-zinc-900">Net Income</span>
+                    <span className={`font-bold tabular-nums text-sm ${prop.net >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                      {prop.net >= 0 ? fmt(prop.net) : `(${fmt(prop.net)})`}
                     </span>
                   </div>
                 </div>
-
-                {/* Vendor table */}
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b bg-white print:border-zinc-200">
-                      <th className="text-left py-1.5 px-4 font-medium text-zinc-500">Vendor</th>
-                      <th className="text-right py-1.5 px-4 font-medium text-zinc-500">Income</th>
-                      <th className="text-right py-1.5 px-4 font-medium text-zinc-500">Expenses</th>
-                      <th className="text-right py-1.5 px-4 font-medium text-zinc-500">Txns</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...proj.vendors.entries()]
-                      .sort(([, a], [, b]) => b.expenses - a.expenses)
-                      .map(([vk, vend]) => (
-                        <tr key={vk} className="border-b last:border-0 print:border-zinc-100">
-                          <td className="py-1.5 px-4 text-zinc-700">{vend.label}</td>
-                          <td className="py-1.5 px-4 text-right text-emerald-700">
-                            {vend.income > 0 ? fmt(vend.income) : "—"}
-                          </td>
-                          <td className="py-1.5 px-4 text-right text-zinc-700">
-                            {vend.expenses > 0 ? fmt(vend.expenses) : "—"}
-                          </td>
-                          <td className="py-1.5 px-4 text-right text-zinc-500">{vend.count}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ── TRANSACTION DETAIL ───────────────────────────────────── */}
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-3 print:text-zinc-500">
-            Transaction Detail
-          </h2>
-          <div className="space-y-6 print:space-y-4">
-            {projectList.map(([projKey, proj]) => (
-              <div key={projKey} className="print:break-inside-avoid">
-                {/* Project heading */}
-                <div className="font-semibold text-sm text-zinc-900 border-b-2 border-zinc-900 pb-1 mb-2 print:border-zinc-700">
-                  {proj.label}
-                </div>
-
-                {[...proj.detail.entries()]
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([catKey, vendorMap]) => (
-                    <div key={catKey} className="ml-4 mb-3 print:ml-3">
-                      {/* Category heading */}
-                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1 print:text-zinc-600">
-                        {catKey}
-                      </div>
-
-                      {[...vendorMap.entries()]
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([vendKey, txList]) => {
-                          const vendLabel = txList[0]?.vendor || "(No Vendor)";
-                          return (
-                            <div key={vendKey} className="ml-4 mb-2 print:ml-3">
-                              {/* Vendor heading */}
-                              <div className="text-xs font-medium text-zinc-600 mb-0.5 print:text-zinc-700">
-                                {vendLabel}
-                              </div>
-
-                              {/* Transactions */}
-                              <table className="w-full text-xs">
-                                <tbody>
-                                  {txList.map((tx) => {
-                                    const amt = parseFloat(String(tx.amount));
-                                    return (
-                                      <tr key={tx.id} className="leading-snug">
-                                        <td className="py-0.5 pr-3 text-zinc-400 whitespace-nowrap font-mono">
-                                          {periodMode === "year" ? tx.transaction_date : tx.transaction_date.slice(5)}
-                                        </td>
-                                        <td className="py-0.5 pr-3 text-zinc-600 max-w-[320px] truncate">
-                                          {tx.notes || tx.description}
-                                        </td>
-                                        <td className={`py-0.5 text-right whitespace-nowrap font-mono ${amt > 0 ? "text-emerald-700" : "text-zinc-700"}`}>
-                                          {amt > 0 ? "+" : "−"}{fmt(amt)}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  ))}
+        {/* 4. RECONCILIATION */}
+        <section className="print:break-inside-avoid">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Reconciliation</h2>
+          <div className="border-t border-b border-zinc-300 py-3 space-y-1.5 text-sm">
+            <div className="flex justify-between">
+              <span className="text-zinc-600">Beginning Balance (Jan 1, {year})</span>
+              <span className="tabular-nums font-medium text-zinc-800">{fmt(beginBal)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-600">+ Net Income</span>
+              <span className={`tabular-nums font-medium ${netIncome >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                {netIncome >= 0 ? fmt(netIncome) : `(${fmt(netIncome)})`}
+              </span>
+            </div>
+            {transfersIn > 0 && (
+              <div className="flex justify-between">
+                <span className="text-zinc-600">+ Transfers In</span>
+                <span className="tabular-nums font-medium text-zinc-700">{fmt(transfersIn)}</span>
               </div>
-            ))}
+            )}
+            {transfersOut > 0 && (
+              <div className="flex justify-between">
+                <span className="text-zinc-600">− Transfers Out</span>
+                <span className="tabular-nums font-medium text-zinc-700">({fmt(transfersOut)})</span>
+              </div>
+            )}
+          </div>
+          <div className="border-b-2 border-zinc-400 pt-2 pb-2 flex justify-between items-center">
+            <span className="font-bold text-zinc-900">Ending Balance (Dec 31, {year})</span>
+            <span className={`font-bold tabular-nums ${endingBal >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+              {endingBal >= 0 ? fmt(endingBal) : `(${fmt(endingBal)})`}
+            </span>
           </div>
         </section>
       </div>
@@ -491,20 +439,5 @@ export default function ReportPage() {
         }
       `}</style>
     </div>
-  );
-}
-
-// ── Helper component ──────────────────────────────────────────────────────────
-
-function OverviewRow({
-  label, value, valueClass = "", highlight = false,
-}: {
-  label: string; value: string; valueClass?: string; highlight?: boolean;
-}) {
-  return (
-    <tr className={highlight ? "bg-zinc-50 print:bg-zinc-50" : ""}>
-      <td className="py-2.5 px-4 text-zinc-500 print:py-1.5">{label}</td>
-      <td className={`py-2.5 px-4 text-right tabular-nums print:py-1.5 ${valueClass}`}>{value}</td>
-    </tr>
   );
 }

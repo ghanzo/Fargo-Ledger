@@ -155,7 +155,7 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_cleaned"):
+    for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_transfer", "is_cleaned"):
         val = getattr(update_data, field)
         if val is not None:
             setattr(tx, field, val)
@@ -461,6 +461,7 @@ def bulk_restore_transactions(snapshots: List[TransactionRestore], db: Session =
         tx.notes           = snap.notes
         tx.tags            = snap.tags
         tx.tax_deductible  = snap.tax_deductible
+        tx.is_transfer     = snap.is_transfer
         tx.is_cleaned      = snap.is_cleaned
     db.commit()
     return {"message": f"Restored {len(snapshots)} transactions"}

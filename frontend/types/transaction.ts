@@ -9,6 +9,7 @@ export interface Transaction {
   notes: string | null;
   tags: string[] | null;
   tax_deductible: boolean | null;
+  is_transfer: boolean;
   source_file: string;
   is_cleaned: boolean;
 }

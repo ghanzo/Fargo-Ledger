@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { usePersistentState } from "@/hooks/use-persistent-state";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -505,17 +506,17 @@ function ProjectTable({
 export default function AnalysisPage() {
   const { activeAccount } = useAccount();
 
-  // Period
+  // Period — persisted across navigation
   const now = new Date();
-  const [periodMode, setPeriodMode] = useState<"month" | "year" | "custom">("month");
-  const [selectedMonth, setSelectedMonth] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [customApplied, setCustomApplied] = useState({ from: "", to: "" });
+  const [periodMode,    setPeriodMode]    = usePersistentState<"month" | "year" | "custom">("analysis:periodMode", "month");
+  const [selectedMonth, setSelectedMonth] = usePersistentState<{ year: number; month: number }>("analysis:selectedMonth", { year: now.getFullYear(), month: now.getMonth() + 1 });
+  const [selectedYear,  setSelectedYear]  = usePersistentState<number>("analysis:selectedYear", now.getFullYear());
+  const [dateFrom,      setDateFrom]      = usePersistentState<string>("analysis:dateFrom", "");
+  const [dateTo,        setDateTo]        = usePersistentState<string>("analysis:dateTo", "");
+  const [customApplied, setCustomApplied] = usePersistentState<{ from: string; to: string }>("analysis:customApplied", { from: "", to: "" });
 
-  // Tabs & drill-down
-  const [activeTab, setActiveTab] = useState<"category" | "vendor" | "project" | "trends">("category");
+  // Tabs — persisted; drill-down resets on navigation (requires re-fetch to restore cleanly)
+  const [activeTab, setActiveTab] = usePersistentState<"category" | "vendor" | "project" | "trends">("analysis:activeTab", "category");
   const [catDrill, setCatDrill] = useState<{ category?: string; vendor?: string; directTx?: boolean }>({});
   const [venDrill, setVenDrill] = useState<{ vendor?: string }>({});
   const [projDrill, setProjDrill] = useState<{ project?: string | null; category?: string }>({});

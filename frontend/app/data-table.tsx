@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { usePersistentState } from "@/hooks/use-persistent-state";
 import { BulkEditDialog } from "@/components/bulk-edit-dialog";
 import { TransactionPanel } from "@/components/transaction-panel";
 import { Transaction } from "@/types/transaction";
@@ -63,21 +64,21 @@ interface DataTableProps<TData, TValue> {
 export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTableProps<TData, TValue>) {
   const [sorting,      setSorting]      = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState({});
-  const [globalFilter, setGlobalFilter] = useState("");
   const [isBulkOpen,   setIsBulkOpen]   = useState(false);
 
   // Side panel state
   const [panelTx,   setPanelTx]   = useState<Transaction | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
-  // Filter state — null = off, true = "has/yes", false = "no/hasn't"
-  const [filterVendor,         setFilterVendor]         = useState<FilterState>(null);
-  const [filterCategory,       setFilterCategory]       = useState<FilterState>(null);
-  const [filterProject,        setFilterProject]        = useState<FilterState>(null);
-  const [filterTaxDeductible,  setFilterTaxDeductible]  = useState<FilterState>(null);
-  const [filterCategorized,    setFilterCategorized]    = useState<FilterState>(null);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo,   setDateTo]   = useState("");
+  // Persistent filter state — survives page navigation within the session
+  const [globalFilter,         setGlobalFilter]         = usePersistentState<string>("dt:globalFilter", "");
+  const [filterVendor,         setFilterVendor]         = usePersistentState<FilterState>("dt:filterVendor", null);
+  const [filterCategory,       setFilterCategory]       = usePersistentState<FilterState>("dt:filterCategory", null);
+  const [filterProject,        setFilterProject]        = usePersistentState<FilterState>("dt:filterProject", null);
+  const [filterTaxDeductible,  setFilterTaxDeductible]  = usePersistentState<FilterState>("dt:filterTaxDeductible", null);
+  const [filterCategorized,    setFilterCategorized]    = usePersistentState<FilterState>("dt:filterCategorized", null);
+  const [dateFrom, setDateFrom] = usePersistentState<string>("dt:dateFrom", "");
+  const [dateTo,   setDateTo]   = usePersistentState<string>("dt:dateTo", "");
 
   const lastSelectedIndex = useRef<number | null>(null);
   const [focusedIndex,   setFocusedIndex]   = useState<number | null>(null);

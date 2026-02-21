@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { usePersistentState } from "@/hooks/use-persistent-state";
 import axios from "axios";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
@@ -40,11 +41,11 @@ export default function ReportPage() {
   const { activeAccount } = useAccount();
 
   const today = new Date();
-  const [year,             setYear]             = useState(today.getFullYear());
+  const [year,             setYear]             = usePersistentState<number>("report:year", today.getFullYear());
+  const [beginningBalance, setBeginningBalance] = usePersistentState<string>("report:beginningBalance", "");
   const [transactions,     setTransactions]     = useState<Transaction[]>([]);
   const [loading,          setLoading]          = useState(false);
   const [saving,           setSaving]           = useState(false);
-  const [beginningBalance, setBeginningBalance] = useState("");
 
   const dateFrom = `${year}-01-01`;
   const dateTo   = `${year}-12-31`;

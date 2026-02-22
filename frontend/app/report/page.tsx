@@ -65,7 +65,7 @@ export default function ReportPage() {
 
   // ── Aggregations ────────────────────────────────────────────────────────────
 
-  const { propertyList, transfersIn, transfersOut, totalIncome, totalExpenses, netIncome } = useMemo(() => {
+  const { propertyList, transfersIn, transfersOut, totalIncome, totalExpenses, netIncome, txByPropertyList, txByDate } = useMemo(() => {
     // Separate transfers from P&L transactions
     let tIn  = 0;
     let tOut = 0;
@@ -135,18 +135,49 @@ export default function ReportPage() {
     const totalInc  = list.reduce((s, [, p]) => s + p.totalIncome,   0);
     const totalExp  = list.reduce((s, [, p]) => s + p.totalExpenses, 0);
 
+    // ── Audit groupings: ALL transactions including transfers ──────────────
+    const txProjMap = new Map<string, { label: string; txs: Transaction[] }>();
+    for (const tx of transactions) {
+      const key   = tx.project || "__none__";
+      const label = tx.project || "Other / Miscellaneous";
+      if (!txProjMap.has(key)) txProjMap.set(key, { label, txs: [] });
+      txProjMap.get(key)!.txs.push(tx);
+    }
+    for (const { txs } of txProjMap.values()) {
+      txs.sort((a, b) => a.transaction_date.localeCompare(b.transaction_date));
+    }
+    const txByPropertyList = [...txProjMap.entries()].sort(([ak], [bk]) => {
+      if (ak === "__none__") return 1;
+      if (bk === "__none__") return -1;
+      return txProjMap.get(ak)!.label.localeCompare(txProjMap.get(bk)!.label);
+    });
+    const txByDate = [...transactions].sort((a, b) =>
+      a.transaction_date.localeCompare(b.transaction_date)
+    );
+
     return {
-      propertyList:  list,
-      transfersIn:   tIn,
-      transfersOut:  tOut,
-      totalIncome:   totalInc,
-      totalExpenses: totalExp,
-      netIncome:     totalInc - totalExp,
+      propertyList:      list,
+      transfersIn:       tIn,
+      transfersOut:      tOut,
+      totalIncome:       totalInc,
+      totalExpenses:     totalExp,
+      netIncome:         totalInc - totalExp,
+      txByPropertyList,
+      txByDate,
     };
   }, [transactions]);
 
   const beginBal  = parseFloat(beginningBalance.replace(/[^0-9.-]/g, "")) || 0;
   const endingBal = beginBal + netIncome + transfersIn - transfersOut;
+
+  // Running balance per row — depends on both txByDate and beginBal
+  const txByDateWithBalance = useMemo(() => {
+    let bal = beginBal;
+    return txByDate.map((tx) => {
+      bal += parseFloat(String(tx.amount));
+      return { tx, runningBal: bal };
+    });
+  }, [txByDate, beginBal]);
 
   const generatedDate = new Date().toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
@@ -425,6 +456,127 @@ export default function ReportPage() {
             </span>
           </div>
         </section>
+
+        {/* 5. TRANSACTIONS BY PROPERTY */}
+        <section className="mt-12 mb-10">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-4">Transactions by Property</h2>
+          <div className="space-y-8">
+            {txByPropertyList.map(([key, { label, txs }]) => {
+              const subtotal = txs.reduce((s, tx) => s + parseFloat(String(tx.amount)), 0);
+              return (
+                <div key={key} className="print:break-inside-avoid">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-1 h-4 bg-zinc-800 rounded-sm" />
+                    <span className="font-bold text-sm text-zinc-800">{label}</span>
+                    <span className="text-xs text-zinc-400">({txs.length} transactions)</span>
+                  </div>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-zinc-200">
+                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Date</th>
+                        <th className="text-left pb-1.5 font-medium text-zinc-400">Description</th>
+                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Vendor</th>
+                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Category</th>
+                        <th className="text-right pb-1.5 font-medium text-zinc-400 w-28">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {txs.map((tx) => {
+                        const amount     = parseFloat(String(tx.amount));
+                        const isTransfer = tx.is_transfer;
+                        const amtClass   = isTransfer ? "text-zinc-400" : amount > 0 ? "text-emerald-600" : "text-zinc-700";
+                        return (
+                          <tr key={tx.id} className="border-b border-zinc-50">
+                            <td className="py-1 pr-2 font-mono text-zinc-400 whitespace-nowrap">{tx.transaction_date}</td>
+                            <td className="py-1 pr-2 text-zinc-700 max-w-[240px] truncate">{tx.description}</td>
+                            <td className="py-1 pr-2 text-zinc-500 truncate">{tx.vendor ?? <span className="text-zinc-300">—</span>}</td>
+                            <td className="py-1 pr-2">
+                              {tx.category ? (
+                                <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{tx.category}</span>
+                              ) : isTransfer ? (
+                                <span className="inline-flex px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 whitespace-nowrap">Transfer</span>
+                              ) : (
+                                <span className="text-zinc-300">—</span>
+                              )}
+                            </td>
+                            <td className={`py-1 text-right font-mono tabular-nums ${amtClass}`}>
+                              {amount >= 0 ? "+" : "−"}{fmt(amount)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-zinc-300">
+                        <td colSpan={4} className="pt-1.5 pr-2 text-right font-semibold text-zinc-700">Subtotal</td>
+                        <td className={`pt-1.5 text-right font-semibold font-mono tabular-nums ${subtotal >= 0 ? "text-emerald-700" : "text-zinc-700"}`}>
+                          {subtotal >= 0 ? "+" : "−"}{fmt(subtotal)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 6. ALL TRANSACTIONS BY DATE */}
+        <section className="mt-12">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-4">All Transactions by Date</h2>
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b-2 border-zinc-300">
+                <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Date</th>
+                <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Property</th>
+                <th className="text-left pb-1.5 font-medium text-zinc-400">Description</th>
+                <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Vendor</th>
+                <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Category</th>
+                <th className="text-right pb-1.5 font-medium text-zinc-400 w-24">Amount</th>
+                <th className="text-right pb-1.5 font-medium text-zinc-400 w-28">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {txByDateWithBalance.map(({ tx, runningBal }) => {
+                const amount     = parseFloat(String(tx.amount));
+                const isTransfer = tx.is_transfer;
+                const amtClass   = isTransfer ? "text-zinc-400" : amount > 0 ? "text-emerald-600" : "text-zinc-700";
+                return (
+                  <tr key={tx.id} className="border-b border-zinc-50">
+                    <td className="py-1 pr-2 font-mono text-zinc-400 whitespace-nowrap">{tx.transaction_date}</td>
+                    <td className="py-1 pr-2 text-zinc-500 truncate">{tx.project ?? <span className="text-zinc-300">—</span>}</td>
+                    <td className="py-1 pr-2 text-zinc-700 max-w-[200px] truncate">{tx.description}</td>
+                    <td className="py-1 pr-2 text-zinc-500 truncate">{tx.vendor ?? <span className="text-zinc-300">—</span>}</td>
+                    <td className="py-1 pr-2">
+                      {tx.category ? (
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{tx.category}</span>
+                      ) : isTransfer ? (
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 whitespace-nowrap">Transfer</span>
+                      ) : (
+                        <span className="text-zinc-300">—</span>
+                      )}
+                    </td>
+                    <td className={`py-1 text-right font-mono tabular-nums ${amtClass}`}>
+                      {amount >= 0 ? "+" : "−"}{fmt(amount)}
+                    </td>
+                    <td className={`py-1 text-right font-mono tabular-nums font-medium ${runningBal >= 0 ? "text-zinc-700" : "text-red-600"}`}>
+                      {fmt(runningBal)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-zinc-400">
+                <td colSpan={5} className="pt-2 font-bold text-zinc-900 text-sm">Ending Balance (Dec 31, {year})</td>
+                <td colSpan={2} className={`pt-2 text-right font-bold font-mono tabular-nums text-sm ${endingBal >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                  {fmt(endingBal)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+
       </div>
 
       {/* ── Print styles ─────────────────────────────────────────────── */}

@@ -42,7 +42,7 @@ export function EditTransactionDialog({ transaction, open, onOpenChange, onSave 
     if (!transaction) return;
     setLoading(true);
     try {
-      await axios.put(`http://localhost:8000/transactions/${transaction.id}`, {
+      await axios.put(`http://localhost:8001/transactions/${transaction.id}`, {
         vendor: vendor || null,
         category: category || null,
         notes: notes || null,

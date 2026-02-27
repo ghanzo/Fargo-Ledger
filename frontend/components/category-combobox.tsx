@@ -37,7 +37,7 @@ export function CategoryCombobox({ value, onChange }: CategoryComboboxProps) {
     if (!open || !activeAccount) return;
     const fetchFacets = async () => {
       try {
-        const res = await axios.get(`http://localhost:8000/facets?account_id=${activeAccount.id}`);
+        const res = await axios.get(`http://localhost:8001/facets?account_id=${activeAccount.id}`);
         setCategories(res.data.categories || []);
       } catch (err) {
         console.error("Failed to load categories", err);

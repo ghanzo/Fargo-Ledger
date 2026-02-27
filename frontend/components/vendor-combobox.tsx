@@ -37,7 +37,7 @@ export function VendorCombobox({ value, onChange }: VendorComboboxProps) {
     if (!activeAccount) return;
     const fetchFacets = async () => {
       try {
-        const res = await axios.get(`http://localhost:8000/facets?account_id=${activeAccount.id}`);
+        const res = await axios.get(`http://localhost:8001/facets?account_id=${activeAccount.id}`);
         setVendors(res.data.vendors || []);
       } catch (err) {
         console.error("Failed to load vendors", err);

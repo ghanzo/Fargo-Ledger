@@ -47,7 +47,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     // Only fetch suggestions for uncategorized transactions
     if (!transaction.is_cleaned) {
       axios
-        .get(`http://localhost:8000/transactions/${transaction.id}/suggest`)
+        .get(`http://localhost:8001/transactions/${transaction.id}/suggest`)
         .then((res) => {
           if (res.data.vendor || res.data.category) setSuggestion(res.data);
         })
@@ -73,7 +73,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     if (!transaction) return;
     setLoading(true);
     try {
-      await axios.put(`http://localhost:8000/transactions/${transaction.id}`, {
+      await axios.put(`http://localhost:8001/transactions/${transaction.id}`, {
         vendor:        vendor   || null,
         category:      category || null,
         project:       project  || null,

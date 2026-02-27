@@ -33,7 +33,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
   const fetchBudgets = async () => {
     if (!activeAccount) return;
     try {
-      const res = await axios.get(`http://localhost:8000/budgets?account_id=${activeAccount.id}`);
+      const res = await axios.get(`http://localhost:8001/budgets?account_id=${activeAccount.id}`);
       setBudgets(res.data);
     } catch {
       toast.error("Failed to load budgets");
@@ -48,7 +48,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
     if (isNaN(numLimit) || numLimit <= 0) { toast.error("Enter a valid monthly limit"); return; }
     setLoading(true);
     try {
-      await axios.post(`http://localhost:8000/budgets?account_id=${activeAccount.id}`, { category, monthly_limit: numLimit });
+      await axios.post(`http://localhost:8001/budgets?account_id=${activeAccount.id}`, { category, monthly_limit: numLimit });
       setCategory(""); setLimit("");
       await fetchBudgets();
       onSaved?.();
@@ -63,7 +63,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
     const num = parseFloat(newLimit);
     if (isNaN(num) || num <= 0) return;
     try {
-      await axios.put(`http://localhost:8000/budgets/${id}`, { monthly_limit: num });
+      await axios.put(`http://localhost:8001/budgets/${id}`, { monthly_limit: num });
       await fetchBudgets();
       onSaved?.();
     } catch {
@@ -73,7 +73,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8000/budgets/${id}`);
+      await axios.delete(`http://localhost:8001/budgets/${id}`);
       await fetchBudgets();
       onSaved?.();
     } catch {

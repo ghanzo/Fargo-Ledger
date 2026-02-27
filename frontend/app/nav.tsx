@@ -31,6 +31,7 @@ export function NavBar() {
         {link("/", "Transactions")}
         {link("/analysis", "Analysis")}
         {link("/report", "Report")}
+        {link("/management", "Management")}
 
         <div className="ml-auto flex items-center gap-2">
           <select

@@ -66,7 +66,7 @@ export function BulkEditDialog({
       updateData.is_cleaned = true;
 
       await axios.patch(
-        `http://localhost:8000/transactions/bulk?account_id=${activeAccount?.id}`,
+        `http://localhost:8001/transactions/bulk?account_id=${activeAccount?.id}`,
         { ids: selectedIds, update_data: updateData },
       );
 
@@ -80,7 +80,7 @@ export function BulkEditDialog({
           label: "Undo",
           onClick: async () => {
             try {
-              await axios.post("http://localhost:8000/transactions/bulk-restore", snapshots);
+              await axios.post("http://localhost:8001/transactions/bulk-restore", snapshots);
               toast.success("Reverted changes");
               onSuccess(); // refresh the table
             } catch {

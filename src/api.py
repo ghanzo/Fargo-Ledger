@@ -7,13 +7,16 @@ from datetime import date
 from collections import defaultdict, Counter
 
 from src.database import SessionLocal, engine
-from src.models import Base, Transaction, Budget, Account
+from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant
 from src.schemas import (
     TransactionResponse, TransactionUpdate, TransactionBulkUpdate, TransactionRestore,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetStatus,
     AccountCreate, AccountResponse,
+    VendorInfoCreate, VendorInfoUpdate, VendorInfoResponse,
+    PropertyCreate, PropertyUpdate, PropertyResponse,
+    TenantCreate, TenantUpdate, TenantResponse,
 )
-from src.importer import import_csv_content
+from src.importer import import_csv_content, extract_description_patterns
 
 Base.metadata.create_all(bind=engine)
 
@@ -154,6 +157,34 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
     tx = db.query(Transaction).filter(Transaction.id == tx_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+
+    # ── Correction tracking ─────────────────────────────────────────────────
+    # If this transaction was auto-categorized and the user changes the vendor,
+    # that is a correction — penalise the old vendor's confidence score.
+    if tx.auto_categorized and "vendor" in update_dict:
+        old_vendor = tx.vendor
+        new_vendor = update_dict["vendor"]
+        if old_vendor and new_vendor != old_vendor:
+            vi = db.query(VendorInfo).filter(
+                VendorInfo.account_id == tx.account_id,
+                VendorInfo.vendor_name == old_vendor,
+            ).first()
+            if vi and vi.rules:
+                rules            = dict(vi.rules)
+                corrected        = rules.get("corrected_count", 0) + 1
+                assigned         = rules.get("assigned_count", 1)
+                confidence       = round(1.0 - (corrected / max(assigned, 1)), 4)
+                rules["corrected_count"] = corrected
+                rules["confidence"]      = confidence
+                if confidence < 0.70:
+                    rules["enabled"] = False
+                vi.rules = rules
+
+    # Once a user manually touches vendor/category/project, clear the auto flag
+    if tx.auto_categorized and any(k in update_dict for k in ("vendor", "category", "project")):
+        tx.auto_categorized = False
 
     for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_transfer", "is_cleaned"):
         val = getattr(update_data, field)
@@ -570,3 +601,311 @@ def get_budget_status(
             percentage=pct,
         ))
     return result
+
+
+# ── Vendor Info ──────────────────────────────────────────────────────────────
+
+@app.get("/vendor-info", response_model=List[VendorInfoResponse])
+def list_vendor_info(account_id: int = Query(...), db: Session = Depends(get_db)):
+    return (
+        db.query(VendorInfo)
+        .filter(VendorInfo.account_id == account_id)
+        .order_by(VendorInfo.trade_category, VendorInfo.vendor_name)
+        .all()
+    )
+
+
+@app.post("/vendor-info", response_model=VendorInfoResponse)
+def create_vendor_info(payload: VendorInfoCreate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    existing = db.query(VendorInfo).filter(
+        VendorInfo.account_id == account_id,
+        VendorInfo.vendor_name == payload.vendor_name,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Vendor with this name already exists")
+    vendor = VendorInfo(account_id=account_id, **payload.model_dump())
+    db.add(vendor)
+    db.commit()
+    db.refresh(vendor)
+    return vendor
+
+
+@app.put("/vendor-info/{vid}", response_model=VendorInfoResponse)
+def update_vendor_info(vid: int, payload: VendorInfoUpdate, db: Session = Depends(get_db)):
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(vendor, field, value)
+    db.commit()
+    db.refresh(vendor)
+    return vendor
+
+
+@app.delete("/vendor-info/{vid}")
+def delete_vendor_info(vid: int, db: Session = Depends(get_db)):
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    db.delete(vendor)
+    db.commit()
+    return {"message": "Vendor deleted"}
+
+
+@app.post("/vendor-info/rebuild-rules")
+def rebuild_vendor_rules(account_id: int = Query(...), db: Session = Depends(get_db)):
+    """
+    Scan all transactions assigned to each vendor and (re)build the auto-assign
+    rules: description patterns, default category/project, and confidence stats.
+    Existing corrected_count / enabled overrides are preserved across rebuilds.
+    """
+    from collections import Counter
+
+    vendors = db.query(VendorInfo).filter(VendorInfo.account_id == account_id).all()
+    txs     = (
+        db.query(Transaction)
+        .filter(Transaction.account_id == account_id, Transaction.vendor != None)
+        .all()
+    )
+
+    # Group transactions by vendor name
+    vendor_txs: dict = defaultdict(list)
+    for tx in txs:
+        vendor_txs[tx.vendor].append(tx)
+
+    updated = 0
+    for vi in vendors:
+        vtxs = vendor_txs.get(vi.vendor_name, [])
+        if not vtxs:
+            continue  # no history yet — leave rules as-is
+
+        # Extract patterns from every assigned description, deduplicate
+        pattern_set: set[str] = set()
+        for tx in vtxs:
+            pattern_set.update(extract_description_patterns(tx.description))
+
+        cat_counter  = Counter(tx.category for tx in vtxs if tx.category)
+        proj_counter = Counter(tx.project  for tx in vtxs if tx.project)
+
+        default_category = cat_counter.most_common(1)[0][0]  if cat_counter  else None
+        default_project  = proj_counter.most_common(1)[0][0] if proj_counter else None
+
+        # Sign-aware: learn separate rules for income (>=0) vs expense (<0)
+        pos_txs = [tx for tx in vtxs if float(tx.amount or 0) >= 0]
+        neg_txs = [tx for tx in vtxs if float(tx.amount or 0) <  0]
+        by_sign = None
+        if pos_txs and neg_txs:
+            ic_top  = Counter(tx.category for tx in pos_txs if tx.category).most_common(1)
+            ip_top  = Counter(tx.project  for tx in pos_txs if tx.project ).most_common(1)
+            ec_top  = Counter(tx.category for tx in neg_txs if tx.category).most_common(1)
+            ep_top  = Counter(tx.project  for tx in neg_txs if tx.project ).most_common(1)
+            ic = ic_top[0][0] if ic_top else default_category
+            ip = ip_top[0][0] if ip_top else default_project
+            ec = ec_top[0][0] if ec_top else default_category
+            ep = ep_top[0][0] if ep_top else default_project
+            if ic != ec or ip != ep:
+                by_sign = {
+                    "income":  {"category": ic, "project": ip},
+                    "expense": {"category": ec, "project": ep},
+                }
+
+        # Preserve correction/confidence history across rebuilds
+        existing       = vi.rules or {}
+        corrected      = existing.get("corrected_count", 0)
+        # assigned_count = historical transaction count (reset on rebuild)
+        assigned       = len(vtxs)
+        confidence     = round(1.0 - (corrected / max(assigned, 1)), 4)
+        # Only auto-disable on rebuild if confidence is very low; let the user re-enable
+        was_disabled   = existing.get("enabled") is False
+        enabled        = (not was_disabled) and confidence >= 0.70
+
+        vi.rules = {
+            "patterns":         sorted(pattern_set),
+            "default_category": default_category,
+            "default_project":  default_project,
+            "by_sign":          by_sign,
+            "enabled":          enabled,
+            "assigned_count":   assigned,
+            "corrected_count":  corrected,
+            "confidence":       confidence,
+        }
+        updated += 1
+
+    # ── Ambiguity cleanup ────────────────────────────────────────────────────
+    # Patterns shared by multiple vendors are unreliable as sole identifiers.
+    # For each contested pattern, only the vendor with the highest assigned_count
+    # keeps it; the others have it stripped.
+    pattern_owners: dict = defaultdict(list)  # pattern → [(assigned_count, vendor)]
+    for vi in vendors:
+        if not vi.rules:
+            continue
+        for p in vi.rules.get("patterns", []):
+            pattern_owners[p].append((vi.rules.get("assigned_count", 0), vi))
+
+    for p, owner_list in pattern_owners.items():
+        if len(owner_list) <= 1:
+            continue
+        # Sort by assigned_count descending; winner keeps the pattern
+        owner_list.sort(key=lambda x: -x[0])
+        for _, vi in owner_list[1:]:
+            rules = dict(vi.rules)
+            rules["patterns"] = [x for x in rules["patterns"] if x != p]
+            vi.rules = rules
+
+    db.commit()
+    return {"updated": updated, "ambiguous_patterns_resolved": sum(
+        1 for owners in pattern_owners.values() if len(owners) > 1
+    )}
+
+
+@app.post("/vendor-info/import-from-transactions")
+def import_vendors_from_transactions(account_id: int = Query(...), db: Session = Depends(get_db)):
+    distinct_vendors = (
+        db.query(Transaction.vendor)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.vendor != None)
+        .all()
+    )
+    created = 0
+    already_existed = 0
+    for (vendor_name,) in distinct_vendors:
+        if not vendor_name:
+            continue
+        existing = db.query(VendorInfo).filter(
+            VendorInfo.account_id == account_id,
+            VendorInfo.vendor_name == vendor_name,
+        ).first()
+        if existing:
+            already_existed += 1
+        else:
+            db.add(VendorInfo(account_id=account_id, vendor_name=vendor_name))
+            created += 1
+    db.commit()
+    return {"created": created, "already_existed": already_existed}
+
+
+# ── Properties ───────────────────────────────────────────────────────────────
+
+@app.get("/properties", response_model=List[PropertyResponse])
+def list_properties(account_id: int = Query(...), db: Session = Depends(get_db)):
+    props = db.query(Property).filter(Property.account_id == account_id).order_by(Property.project_name).all()
+    result = []
+    for prop in props:
+        tenants = db.query(Tenant).filter(Tenant.property_id == prop.id).order_by(Tenant.name).all()
+        result.append(PropertyResponse(
+            id=prop.id,
+            account_id=prop.account_id,
+            project_name=prop.project_name,
+            address=prop.address,
+            notes=prop.notes,
+            tenants=[TenantResponse(
+                id=t.id,
+                property_id=t.property_id,
+                name=t.name,
+                phone=t.phone,
+                email=t.email,
+                lease_start=t.lease_start,
+                lease_end=t.lease_end,
+                monthly_rent=float(t.monthly_rent) if t.monthly_rent is not None else None,
+                notes=t.notes,
+            ) for t in tenants],
+        ))
+    return result
+
+
+@app.post("/properties", response_model=PropertyResponse)
+def create_property(payload: PropertyCreate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    existing = db.query(Property).filter(
+        Property.account_id == account_id,
+        Property.project_name == payload.project_name,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Property with this name already exists")
+    prop = Property(account_id=account_id, **payload.model_dump())
+    db.add(prop)
+    db.commit()
+    db.refresh(prop)
+    return PropertyResponse(
+        id=prop.id,
+        account_id=prop.account_id,
+        project_name=prop.project_name,
+        address=prop.address,
+        notes=prop.notes,
+        tenants=[],
+    )
+
+
+@app.put("/properties/{pid}", response_model=PropertyResponse)
+def update_property(pid: int, payload: PropertyUpdate, db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(prop, field, value)
+    db.commit()
+    db.refresh(prop)
+    tenants = db.query(Tenant).filter(Tenant.property_id == prop.id).order_by(Tenant.name).all()
+    return PropertyResponse(
+        id=prop.id,
+        account_id=prop.account_id,
+        project_name=prop.project_name,
+        address=prop.address,
+        notes=prop.notes,
+        tenants=[TenantResponse(
+            id=t.id,
+            property_id=t.property_id,
+            name=t.name,
+            phone=t.phone,
+            email=t.email,
+            lease_start=t.lease_start,
+            lease_end=t.lease_end,
+            monthly_rent=float(t.monthly_rent) if t.monthly_rent is not None else None,
+            notes=t.notes,
+        ) for t in tenants],
+    )
+
+
+@app.delete("/properties/{pid}")
+def delete_property(pid: int, db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    db.delete(prop)
+    db.commit()
+    return {"message": "Property deleted"}
+
+
+# ── Tenants ──────────────────────────────────────────────────────────────────
+
+@app.post("/properties/{pid}/tenants", response_model=TenantResponse)
+def create_tenant(pid: int, payload: TenantCreate, db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    tenant = Tenant(property_id=pid, **payload.model_dump())
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+@app.put("/tenants/{tid}", response_model=TenantResponse)
+def update_tenant(tid: int, payload: TenantUpdate, db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(tenant, field, value)
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+@app.delete("/tenants/{tid}")
+def delete_tenant(tid: int, db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    db.delete(tenant)
+    db.commit()
+    return {"message": "Tenant deleted"}

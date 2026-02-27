@@ -57,7 +57,7 @@ interface ProjectData {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const API = "http://localhost:8000";
+const API = "http://localhost:8001";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);

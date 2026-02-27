@@ -23,7 +23,7 @@ export default function Home() {
     setLoading(true);
     try {
       const response = await axios.get(
-        `http://localhost:8000/transactions?account_id=${activeAccount.id}`
+        `http://localhost:8001/transactions?account_id=${activeAccount.id}`
       );
       setTransactions(response.data);
     } catch {

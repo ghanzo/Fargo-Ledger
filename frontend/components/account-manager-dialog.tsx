@@ -25,7 +25,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
     if (!newName.trim()) return;
     setLoading(true);
     try {
-      await axios.post("http://localhost:8000/accounts", { name: newName.trim() });
+      await axios.post("http://localhost:8001/accounts", { name: newName.trim() });
       setNewName("");
       await refreshAccounts();
     } catch (err: any) {
@@ -48,7 +48,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
   const handleRename = async (id: number) => {
     if (!editName.trim()) return;
     try {
-      await axios.put(`http://localhost:8000/accounts/${id}`, { name: editName.trim() });
+      await axios.put(`http://localhost:8001/accounts/${id}`, { name: editName.trim() });
       setEditingId(null);
       setEditName("");
       await refreshAccounts();
@@ -59,7 +59,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8000/accounts/${id}`);
+      await axios.delete(`http://localhost:8001/accounts/${id}`);
       await refreshAccounts();
     } catch (err: any) {
       toast.error(err?.response?.data?.detail ?? "Failed to delete account");

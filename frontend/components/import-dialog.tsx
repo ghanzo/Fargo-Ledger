@@ -46,7 +46,7 @@ export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: Impor
       const form = new FormData();
       form.append("file", file);
       form.append("account_id", String(accountId));
-      const res = await axios.post("http://localhost:8000/import/csv", form);
+      const res = await axios.post("http://localhost:8001/import/csv", form);
       setResult(res.data);
       toast.success(`Imported ${res.data.imported} new transactions`);
       onSuccess();

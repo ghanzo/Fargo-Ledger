@@ -23,7 +23,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      const res = await axios.get("http://localhost:8000/accounts");
+      const res = await axios.get("http://localhost:8001/accounts");
       const fetched: Account[] = res.data;
       setAccounts(fetched);
 

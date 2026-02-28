@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -17,10 +20,21 @@ from src.schemas import (
     TenantCreate, TenantUpdate, TenantResponse,
 )
 from src.importer import import_csv_content, extract_description_patterns
+from src import watcher
+
+logging.basicConfig(level=logging.INFO)
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Finance API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    watcher.start_watcher()
+    yield
+    watcher.stop_watcher()
+
+
+app = FastAPI(title="Finance API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +68,18 @@ def apply_date_filter(query, date_from: Optional[date], date_to: Optional[date])
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Finance API is running"}
+
+
+# ── Watcher ───────────────────────────────────────────────────────────────
+
+@app.get("/watcher/status")
+def watcher_status():
+    return watcher.get_status()
+
+
+@app.get("/watcher/log")
+def watcher_log(limit: int = Query(20, ge=1, le=100)):
+    return watcher.get_log(limit)
 
 
 # ── Account CRUD ───────────────────────────────────────────────────────────

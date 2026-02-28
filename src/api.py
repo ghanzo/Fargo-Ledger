@@ -10,7 +10,7 @@ from datetime import date
 from collections import defaultdict, Counter
 
 from src.database import SessionLocal, engine
-from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant
+from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant, ImportSuggestion
 from src.schemas import (
     TransactionResponse, TransactionUpdate, TransactionBulkUpdate, TransactionRestore,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetStatus,
@@ -18,6 +18,7 @@ from src.schemas import (
     VendorInfoCreate, VendorInfoUpdate, VendorInfoResponse,
     PropertyCreate, PropertyUpdate, PropertyResponse,
     TenantCreate, TenantUpdate, TenantResponse,
+    ImportSuggestionResponse, SuggestionApproveBody,
 )
 from src.importer import import_csv_content, extract_description_patterns
 from src import watcher
@@ -286,6 +287,138 @@ async def import_csv(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
+
+
+# ── Import Suggestions ─────────────────────────────────────────────────────
+
+@app.get("/suggestions", response_model=List[ImportSuggestionResponse])
+def list_suggestions(account_id: int = Query(...), db: Session = Depends(get_db)):
+    rows = (
+        db.query(ImportSuggestion)
+        .filter(ImportSuggestion.account_id == account_id, ImportSuggestion.status == "pending")
+        .order_by(ImportSuggestion.created_at.desc())
+        .all()
+    )
+    result = []
+    for s in rows:
+        tx_ids = s.transaction_ids or []
+        samples = []
+        if tx_ids:
+            sample_txs = (
+                db.query(Transaction.description)
+                .filter(Transaction.id.in_(tx_ids[:5]))
+                .all()
+            )
+            samples = [t.description for t in sample_txs]
+        result.append(ImportSuggestionResponse(
+            id=s.id,
+            account_id=s.account_id,
+            vendor_info_id=s.vendor_info_id,
+            suggested_vendor=s.suggested_vendor,
+            suggested_category=s.suggested_category,
+            suggested_project=s.suggested_project,
+            pattern_matched=s.pattern_matched,
+            transaction_ids=tx_ids,
+            transaction_count=len(tx_ids),
+            sample_descriptions=samples,
+            status=s.status,
+            created_at=s.created_at,
+        ))
+    return result
+
+
+@app.post("/suggestions/{suggestion_id}/approve")
+def approve_suggestion(
+    suggestion_id: int,
+    body: SuggestionApproveBody = None,
+    db: Session = Depends(get_db),
+):
+    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    if s.status != "pending":
+        raise HTTPException(status_code=400, detail="Suggestion already processed")
+
+    vendor   = (body.vendor   if body and body.vendor   else None) or s.suggested_vendor
+    category = (body.category if body and body.category else None) or s.suggested_category
+    project  = (body.project  if body and body.project  else None) or s.suggested_project
+
+    tx_ids = s.transaction_ids or []
+    update_data = {}
+    if vendor:
+        update_data["vendor"] = vendor
+    if category:
+        update_data["category"] = category
+    if project:
+        update_data["project"] = project
+    update_data["auto_categorized"] = True
+
+    if tx_ids and update_data:
+        db.query(Transaction).filter(Transaction.id.in_(tx_ids)).update(
+            update_data, synchronize_session=False
+        )
+
+    # Increment assigned_count on the vendor
+    if s.vendor_info_id:
+        vi = db.query(VendorInfo).filter(VendorInfo.id == s.vendor_info_id).first()
+        if vi and vi.rules:
+            rules = dict(vi.rules)
+            rules["assigned_count"] = rules.get("assigned_count", 0) + len(tx_ids)
+            vi.rules = rules
+
+    s.status = "approved"
+    db.commit()
+    return {"message": f"Applied to {len(tx_ids)} transactions"}
+
+
+@app.post("/suggestions/{suggestion_id}/dismiss")
+def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
+    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    if s.status != "pending":
+        raise HTTPException(status_code=400, detail="Suggestion already processed")
+    s.status = "dismissed"
+    db.commit()
+    return {"message": "Suggestion dismissed"}
+
+
+@app.post("/suggestions/approve-all")
+def approve_all_suggestions(account_id: int = Query(...), db: Session = Depends(get_db)):
+    pending = (
+        db.query(ImportSuggestion)
+        .filter(ImportSuggestion.account_id == account_id, ImportSuggestion.status == "pending")
+        .all()
+    )
+    total_txs = 0
+    for s in pending:
+        tx_ids = s.transaction_ids or []
+        update_data = {}
+        if s.suggested_vendor:
+            update_data["vendor"] = s.suggested_vendor
+        if s.suggested_category:
+            update_data["category"] = s.suggested_category
+        if s.suggested_project:
+            update_data["project"] = s.suggested_project
+        update_data["auto_categorized"] = True
+
+        if tx_ids and update_data:
+            db.query(Transaction).filter(Transaction.id.in_(tx_ids)).update(
+                update_data, synchronize_session=False
+            )
+            total_txs += len(tx_ids)
+
+        if s.vendor_info_id:
+            vi = db.query(VendorInfo).filter(VendorInfo.id == s.vendor_info_id).first()
+            if vi and vi.rules:
+                rules = dict(vi.rules)
+                rules["assigned_count"] = rules.get("assigned_count", 0) + len(tx_ids)
+                vi.rules = rules
+
+        s.status = "approved"
+
+    db.commit()
+    return {"message": f"Approved {len(pending)} suggestions, updated {total_txs} transactions"}
 
 
 # ── Suggest ────────────────────────────────────────────────────────────────

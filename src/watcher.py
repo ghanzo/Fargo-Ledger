@@ -104,12 +104,12 @@ def _process_csv(file_path: Path):
             "status": "success",
             "imported": result["imported"],
             "skipped": result["skipped"],
-            "auto_categorized": result["auto_categorized"],
+            "suggestions_created": result.get("suggestions_created", 0),
         }
         import_log.add(log_entry)
         logger.info(
-            "Imported %s: %d new, %d skipped, %d auto-categorized",
-            filename, result["imported"], result["skipped"], result["auto_categorized"],
+            "Imported %s: %d new, %d skipped, %d suggestions created",
+            filename, result["imported"], result["skipped"], result.get("suggestions_created", 0),
         )
 
     except Exception as e:

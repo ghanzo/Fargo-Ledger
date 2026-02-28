@@ -19,7 +19,7 @@ interface ImportDialogProps {
 export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: ImportDialogProps) {
   const [file,    setFile]    = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState<{ imported: number; skipped: number } | null>(null);
+  const [result,  setResult]  = useState<{ imported: number; skipped: number; suggestions_created?: number } | null>(null);
   const [dragOver,setDragOver]= useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -79,8 +79,8 @@ export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: Impor
             onClick={() => inputRef.current?.click()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
               dragOver
-                ? "border-blue-400 bg-blue-50"
-                : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"
+                ? "border-blue-400 bg-blue-500/10"
+                : "border-border hover:border-ring hover:bg-muted"
             }`}
           >
             <input
@@ -93,32 +93,37 @@ export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: Impor
             {file ? (
               <div className="flex items-center justify-center gap-2">
                 <FileText className="h-5 w-5 text-blue-500 shrink-0" />
-                <span className="text-sm font-medium text-zinc-700 truncate max-w-[260px]">
+                <span className="text-sm font-medium text-foreground truncate max-w-[260px]">
                   {file.name}
                 </span>
                 <button
                   onClick={(e) => { e.stopPropagation(); setFile(null); setResult(null); }}
-                  className="text-zinc-400 hover:text-zinc-600 shrink-0"
+                  className="text-muted-foreground hover:text-muted-foreground shrink-0"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
             ) : (
               <div className="space-y-2">
-                <Upload className="h-8 w-8 text-zinc-300 mx-auto" />
-                <p className="text-sm text-zinc-500">Drop a CSV file here, or click to browse</p>
-                <p className="text-xs text-zinc-400">Wells Fargo export format</p>
+                <Upload className="h-8 w-8 text-muted-foreground mx-auto" />
+                <p className="text-sm text-muted-foreground">Drop a CSV file here, or click to browse</p>
+                <p className="text-xs text-muted-foreground">Wells Fargo export format</p>
               </div>
             )}
           </div>
 
           {/* Result */}
           {result && (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+            <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/25 p-3">
               <p className="text-sm font-medium text-emerald-700">Import complete</p>
               <p className="text-xs text-emerald-600 mt-0.5">
                 {result.imported} new · {result.skipped} already in database
               </p>
+              {(result.suggestions_created ?? 0) > 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  {result.suggestions_created} suggestion group{result.suggestions_created !== 1 ? "s" : ""} ready for review
+                </p>
+              )}
             </div>
           )}
         </div>

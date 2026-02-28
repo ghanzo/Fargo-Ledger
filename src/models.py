@@ -1,5 +1,5 @@
 import hashlib
-from sqlalchemy import Column, String, Date, Numeric, Boolean, JSON, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Date, Numeric, Boolean, JSON, Integer, ForeignKey, UniqueConstraint, DateTime, func
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -94,6 +94,20 @@ class Tenant(Base):
     lease_end    = Column(Date)
     monthly_rent = Column(Numeric(10, 2))
     notes        = Column(String)
+
+
+class ImportSuggestion(Base):
+    __tablename__ = 'import_suggestions'
+    id                 = Column(Integer, primary_key=True, autoincrement=True)
+    account_id         = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'))
+    vendor_info_id     = Column(Integer, ForeignKey('vendor_info.id', ondelete='CASCADE'), nullable=True)
+    suggested_vendor   = Column(String, nullable=True)
+    suggested_category = Column(String, nullable=True)
+    suggested_project  = Column(String, nullable=True)
+    pattern_matched    = Column(String)
+    transaction_ids    = Column(JSON)     # ["hash-0", "hash-1", ...]
+    status             = Column(String, default='pending')  # pending/approved/dismissed
+    created_at         = Column(DateTime, default=func.now())
 
 
 def generate_id(date_obj, description, amount):

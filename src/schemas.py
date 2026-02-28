@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, Any
 
 # ── Account schemas ────────────────────────────────────────────────────────
@@ -86,6 +86,30 @@ class BudgetStatus(BaseModel):
     actual_spend:  float
     remaining:     float
     percentage:    float
+
+# ── Import Suggestion schemas ──────────────────────────────────────────────
+
+class ImportSuggestionResponse(BaseModel):
+    id:                  int
+    account_id:          int
+    vendor_info_id:      Optional[int]  = None
+    suggested_vendor:    Optional[str]  = None
+    suggested_category:  Optional[str]  = None
+    suggested_project:   Optional[str]  = None
+    pattern_matched:     str
+    transaction_ids:     List[str]
+    transaction_count:   int
+    sample_descriptions: List[str]
+    status:              str
+    created_at:          datetime
+
+    class Config:
+        from_attributes = True
+
+class SuggestionApproveBody(BaseModel):
+    vendor:   Optional[str] = None
+    category: Optional[str] = None
+    project:  Optional[str] = None
 
 # ── VendorInfo schemas ──────────────────────────────────────────────────────
 

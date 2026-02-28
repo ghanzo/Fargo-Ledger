@@ -10,7 +10,7 @@ from collections import defaultdict
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from src.models import Transaction, VendorInfo
+from src.models import Transaction, VendorInfo, ImportSuggestion
 
 
 # ── Pattern helpers ──────────────────────────────────────────────────────────
@@ -91,7 +91,8 @@ _CONFIDENCE_ASSIGN_THRESHOLD = 0.70  # auto-assign only (leave is_cleaned=False)
 def import_csv_content(content: bytes, source_file: str, db: Session, account_id: int) -> dict:
     """
     Parse Wells Fargo CSV bytes and insert new transactions into the database.
-    Returns {"imported": N, "skipped": N, "auto_categorized": N}.
+    Pattern matches are stored as pending suggestions instead of being applied directly.
+    Returns {"imported": N, "skipped": N, "suggestions_created": N}.
     """
     try:
         df = pd.read_csv(
@@ -118,9 +119,10 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
 
     imported = 0
     skipped  = 0
-    auto_count = 0
-    assigned_delta: dict[int, int] = defaultdict(int)  # vendor_info.id → new auto-assignments
     file_hash_counts: dict = defaultdict(int)
+
+    # Accumulate suggestion groups: vendor_info_id → {vi, tx_ids, pattern}
+    suggestions_map: dict[int, dict] = {}
 
     for _, row in df.iterrows():
         try:
@@ -140,32 +142,7 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
             skipped += 1
             continue
 
-        # ── Auto-assign ────────────────────────────────────────────────────
-        matched_vi      = find_matching_vendor(desc, auto_candidates)
-        vendor_name     = None
-        category        = None
-        project         = None
-        auto_categorized = False
-        is_cleaned      = False
-
-        if matched_vi:
-            rules        = matched_vi.rules
-            confidence   = rules.get("confidence", 1.0)
-            vendor_name  = matched_vi.vendor_name
-            by_sign      = rules.get("by_sign")
-            if by_sign:
-                sign_key   = "income" if amount >= 0 else "expense"
-                sign_rules = by_sign.get(sign_key, {})
-                category   = sign_rules.get("category") or rules.get("default_category")
-                project    = sign_rules.get("project")  or rules.get("default_project")
-            else:
-                category   = rules.get("default_category")
-                project    = rules.get("default_project")
-            auto_categorized = True
-            is_cleaned   = confidence >= _CONFIDENCE_CLEAN_THRESHOLD
-            assigned_delta[matched_vi.id] += 1
-            auto_count += 1
-
+        # Insert transaction with NULL vendor/category/project
         db.add(Transaction(
             id               = tx_id,
             account_id       = account_id,
@@ -174,24 +151,59 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
             amount           = amount,
             source_file      = source_file,
             raw_data         = json.loads(row.to_json()),
-            vendor           = vendor_name,
-            category         = category,
-            project          = project,
-            auto_categorized = auto_categorized,
-            is_cleaned       = is_cleaned,
         ))
         imported += 1
 
+        # Check for pattern match → accumulate into suggestions
+        matched_vi = find_matching_vendor(desc, auto_candidates)
+        if matched_vi:
+            vi_id = matched_vi.id
+            if vi_id not in suggestions_map:
+                rules = matched_vi.rules
+                by_sign = rules.get("by_sign")
+                if by_sign:
+                    sign_key   = "income" if amount >= 0 else "expense"
+                    sign_rules = by_sign.get(sign_key, {})
+                    s_category = sign_rules.get("category") or rules.get("default_category")
+                    s_project  = sign_rules.get("project")  or rules.get("default_project")
+                else:
+                    s_category = rules.get("default_category")
+                    s_project  = rules.get("default_project")
+                # Find which pattern actually matched
+                desc_upper = desc.upper()
+                matched_pattern = ""
+                for p in rules.get("patterns", []):
+                    if p and p.upper() in desc_upper:
+                        matched_pattern = p
+                        break
+                suggestions_map[vi_id] = {
+                    "vi": matched_vi,
+                    "tx_ids": [],
+                    "pattern": matched_pattern,
+                    "category": s_category,
+                    "project": s_project,
+                }
+            suggestions_map[vi_id]["tx_ids"].append(tx_id)
+
     db.commit()
 
-    # Update assigned_count on each vendor that got new auto-assignments
-    for vi_id, delta in assigned_delta.items():
-        vi = db.query(VendorInfo).filter(VendorInfo.id == vi_id).first()
-        if vi and vi.rules:
-            rules = dict(vi.rules)
-            rules["assigned_count"] = rules.get("assigned_count", 0) + delta
-            vi.rules = rules
-    if assigned_delta:
+    # Create ImportSuggestion records for each matched vendor group
+    suggestions_created = 0
+    for vi_id, sg in suggestions_map.items():
+        vi = sg["vi"]
+        db.add(ImportSuggestion(
+            account_id       = account_id,
+            vendor_info_id   = vi_id,
+            suggested_vendor   = vi.vendor_name,
+            suggested_category = sg["category"],
+            suggested_project  = sg["project"],
+            pattern_matched    = sg["pattern"],
+            transaction_ids    = sg["tx_ids"],
+            status             = "pending",
+        ))
+        suggestions_created += 1
+
+    if suggestions_created:
         db.commit()
 
-    return {"imported": imported, "skipped": skipped, "auto_categorized": auto_count}
+    return {"imported": imported, "skipped": skipped, "suggestions_created": suggestions_created}

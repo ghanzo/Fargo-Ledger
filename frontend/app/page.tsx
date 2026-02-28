@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Upload } from "lucide-react";
 import { ImportDialog } from "@/components/import-dialog";
+import { SuggestionBanner } from "@/components/suggestion-banner";
 import { useAccount } from "@/context/account-context";
 
 export default function Home() {
@@ -38,13 +39,13 @@ export default function Home() {
   }, [activeAccount]);
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans p-8">
+    <div className="min-h-screen bg-muted text-foreground font-sans p-8">
       <Toaster />
 
       <header className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
-          <p className="text-zinc-500 text-sm mt-0.5">
+          <p className="text-muted-foreground text-sm mt-0.5">
             {loading ? "Loading..." : `${transactions.length.toLocaleString()} transactions`}
           </p>
         </div>
@@ -59,9 +60,13 @@ export default function Home() {
         </Button>
       </header>
 
-      <div className="bg-white rounded-xl border shadow-sm p-6">
+      {activeAccount && (
+        <SuggestionBanner accountId={activeAccount.id} onApplied={fetchData} />
+      )}
+
+      <div className="bg-background rounded-xl border shadow-sm p-6">
         {transactions.length === 0 && loading ? (
-          <div className="text-center py-16 text-zinc-400">Loading transactions...</div>
+          <div className="text-center py-16 text-muted-foreground">Loading transactions...</div>
         ) : (
           <DataTable columns={columns} data={transactions} onRefresh={fetchData} />
         )}

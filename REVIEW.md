@@ -1,6 +1,6 @@
 # Independent Technical Review — Finance Dashboard
 
-**Date:** 2026-02-27
+**Date:** 2026-02-27 (updated 2026-02-28)
 **Reviewer:** Claude (Opus 4.6)
 **Codebase:** Fargo Ledger — Self-hosted personal finance tracker
 
@@ -24,9 +24,10 @@ FastAPI  (localhost:8000, Docker: finance-app-1)
 PostgreSQL 15  (localhost:5432, Docker: finance-db-1)
 ```
 
-**Backend:** 5 Python files (~1,500 LOC) — api.py, models.py, schemas.py, database.py, importer.py
-**Frontend:** ~25 TSX/TS files — pages, components, context, hooks, types
+**Backend:** 7 Python files (~1,900 LOC) — api.py (1,071), models.py (116), schemas.py (204), importer.py (210), watcher.py (201), database.py (16), ingest.py (119)
+**Frontend:** ~25 TSX/TS files (~7,000 LOC) — pages, components, context, hooks, types
 **Infrastructure:** Docker Compose (2 services), .env config
+**Total:** ~8,900 lines of code across 51 source files
 
 ---
 
@@ -50,6 +51,14 @@ PostgreSQL 15  (localhost:5432, Docker: finance-db-1)
 - **Client-side filtering** — All transactions loaded once, filtered in `useMemo` — fast and responsive
 - **Combobox pattern** — Free-form creation ("Create: new value") for vendor/category/project
 - **3-state FilterPill** — Elegant null → true → false → null cycling for boolean filters
+
+### Automation & Intelligence
+- **Folder watcher** (`watcher.py`) — Monitors `/app/data/inbox/{AccountName}/` for new CSVs, waits for file stability (2s size check), imports automatically, moves to `processed/` folder. Thread-safe logging with `threading.Lock`. Lifespan-managed via FastAPI context manager.
+- **Import suggestions** — Auto-categorization generates pending suggestions (pattern match + proposed vendor/category). Users review via SuggestionBanner (approve/edit/dismiss individually or batch approve-all).
+- **Vendor confidence scoring** — Self-correcting: `confidence = 1.0 - (corrected_count / max(assigned_count, 1))`. Thresholds: ≥0.85 auto-assign + mark cleaned, ≥0.70 auto-assign only, <0.70 auto-disables the rule.
+- **Sign-aware vendor rules** — Learns separate category/project per transaction sign (+/-), so vendor refunds get different categories than purchases.
+- **Pattern extraction** — Tokenizes descriptions with 50+ noise word filter (DEBIT, PAYMENT, state abbreviations), extracts 1-2 meaningful tokens ≥3 chars. Ambiguity resolution: only the vendor with highest `assigned_count` keeps a shared pattern.
+- **Correction tracking** — When user manually edits an auto-categorized transaction's vendor: old vendor's `corrected_count` increments, confidence recalculates, and auto-disable triggers if confidence drops below 0.70.
 
 ---
 
@@ -75,16 +84,27 @@ PostgreSQL 15  (localhost:5432, Docker: finance-db-1)
 | 9 | **File upload not validated** — Only checks `.csv` extension, no file size limit or MIME type check | `src/api.py` import endpoint | Security |
 | 10 | **Hard cascade deletes** — Deleting an account permanently removes all transactions, budgets, vendors, properties | `src/models.py` Account model | Data safety |
 | 11 | **CSV import only supports Wells Fargo** — Hardcoded 5-column format | `src/importer.py` | Flexibility |
+| 12 | **N+1 query in suggestions** — Each suggestion triggers a separate query for sample transaction descriptions in a loop | `src/api.py` `/suggestions` endpoint | Performance |
+| 13 | **Stats endpoints not cached** — Every chart request triggers a full DB scan; no TTL caching | `src/api.py` `/stats/*` endpoints | Performance |
+| 14 | **No audit timestamps** — Transactions have no `created_at`/`updated_at`; cannot trace when changes happened | `src/models.py` Transaction model | Auditing |
+| 15 | **No concurrency control** — No optimistic locking on bulk operations; overlapping updates can conflict | `src/api.py` bulk endpoints | Data integrity |
+| 16 | **No server-side pagination enforced** — `GET /transactions` has optional `limit` but no max; all rows can load into memory | `src/api.py` transactions endpoint | Scalability |
 
 ### Minor
 
 | # | Issue | Location | Impact |
 |---|-------|----------|--------|
-| 12 | Dead code: `edit-transaction-dialog.tsx` exists but is unused (replaced by TransactionPanel) | `frontend/components/` | Cleanliness |
-| 13 | Vendor combobox fetches on mount; category/project fetch on popover open — inconsistent | `frontend/components/` | Consistency |
-| 14 | No structured logging — debugging in production requires reading stdout | `src/api.py` | Observability |
-| 15 | No mobile responsive design — tables overflow on small screens | `frontend/app/data-table.tsx` | Accessibility |
-| 16 | CORS hardcoded to `localhost:3000` — needs env var for deployment | `src/api.py` | Deployment |
+| 17 | Dead code: `edit-transaction-dialog.tsx` exists but is unused (replaced by TransactionPanel) | `frontend/components/` | Cleanliness |
+| 18 | Vendor combobox fetches on mount; category/project fetch on popover open — inconsistent | `frontend/components/` | Consistency |
+| 19 | No structured logging — debugging in production requires reading stdout | `src/api.py` | Observability |
+| 20 | No mobile responsive design — tables overflow on small screens | `frontend/app/data-table.tsx` | Accessibility |
+| 21 | CORS hardcoded to `localhost:3000` — needs env var for deployment | `src/api.py` | Deployment |
+| 22 | `top_vendors` stat sorts in Python — should use SQL `ORDER BY` + `LIMIT` | `src/api.py` ~line 582 | Performance |
+| 23 | CSV import silently skips malformed rows — counted as imported with no logging | `src/importer.py` | Observability |
+| 24 | Magic numbers without constants — confidence thresholds (0.70, 0.85), pattern prefix length (30) hardcoded | `src/importer.py`, `src/api.py` | Maintainability |
+| 25 | `any` type cast for TanStack Table meta — bypasses type safety | `frontend/app/data-table.tsx` | Type safety |
+| 26 | No request deduplication on frontend — same facets can be fetched multiple times | Frontend comboboxes | Performance |
+| 27 | Watcher account lookup by folder name is fragile — breaks if user renames account | `src/watcher.py` | Reliability |
 
 ---
 
@@ -110,17 +130,22 @@ PostgreSQL 15  (localhost:5432, Docker: finance-db-1)
 ```
 accounts
 ├── transactions (FK account_id, CASCADE DELETE)
+│   └── id = SHA256(date+description+amount) + occurrence suffix
+│   └── tags (JSON array), raw_data (JSON)
 ├── budgets (FK account_id, CASCADE DELETE)
 │   └── UNIQUE(account_id, category)
 ├── vendor_info (FK account_id, CASCADE DELETE)
 │   └── UNIQUE(account_id, vendor_name)
-│   └── rules (JSON: patterns, defaults, by_sign, confidence)
-└── properties (FK account_id, CASCADE DELETE)
-    └── UNIQUE(account_id, project_name)
-    └── tenants (FK property_id, CASCADE DELETE)
+│   └── rules (JSON: patterns, defaults, by_sign, confidence, enabled)
+├── import_suggestions (FK account_id, CASCADE DELETE)
+│   └── status: pending/approved/dismissed
+│   └── transaction_ids (JSON array), pattern_matched
+├── properties (FK account_id, CASCADE DELETE)
+│   └── UNIQUE(account_id, project_name)
+│   └── tenants (FK property_id, CASCADE DELETE)
 ```
 
-**6 tables, all account-scoped, all with cascade deletes.**
+**7 tables, all account-scoped, all with cascade deletes.**
 
 ---
 
@@ -140,6 +165,12 @@ accounts
 | GET | `/transactions/{id}/suggest` | Auto-suggest vendor/category |
 | GET | `/facets` | Distinct categories, vendors, projects |
 | POST | `/import/csv` | Import Wells Fargo CSV |
+| GET | `/suggestions` | List pending auto-categorization suggestions |
+| POST | `/suggestions/{id}/approve` | Apply suggestion to matched transactions |
+| POST | `/suggestions/{id}/dismiss` | Dismiss suggestion |
+| POST | `/suggestions/approve-all` | Batch approve all pending suggestions |
+| GET | `/watcher/status` | Import watcher running state |
+| GET | `/watcher/log` | Recent auto-import log entries |
 | GET | `/stats/summary` | Income/expenses/net totals |
 | GET | `/stats/category_breakdown` | Spending by category |
 | GET | `/stats/project_breakdown` | Income/expenses by project |
@@ -165,7 +196,7 @@ accounts
 | PUT | `/tenants/{id}` | Update tenant |
 | DELETE | `/tenants/{id}` | Delete tenant |
 
-**35 endpoints total across 6 resource groups.**
+**42 endpoints total across 9 resource groups.**
 
 ---
 
@@ -209,6 +240,41 @@ accounts
 
 ---
 
+## Key Algorithms Deep Dive
+
+### Transaction Deduplication
+```
+base_hash = SHA256(date + description + amount)
+tx_id = "{base_hash}-{occurrence_index}"
+```
+Occurrence index is per-file (reset on each import). Handles genuine duplicates (two identical transactions same day) and prevents re-imports of the same file.
+
+### Vendor Auto-Assignment Flow
+1. On CSV import, `importer.py` extracts description patterns
+2. Matches patterns against `vendor_info.rules.patterns`
+3. If confidence ≥ 0.85: auto-assign vendor + category + mark `is_cleaned=true`
+4. If confidence ≥ 0.70 but < 0.85: auto-assign but leave for review
+5. If confidence < 0.70: disable the rule automatically
+6. Unmatched patterns with enough frequency create `import_suggestions`
+
+### Pattern Ambiguity Resolution
+When multiple vendors share a description pattern, only the vendor with the highest `assigned_count` keeps the pattern. This runs during `POST /vendor-info/rebuild-rules`.
+
+---
+
+## Performance Profile
+
+| Operation | Current Behavior | Scale Concern |
+|-----------|-----------------|---------------|
+| Load transactions | All rows to client, filter in useMemo | Degrades at 10k+ rows |
+| Stats queries | Full table scan per chart | Redundant on each page visit |
+| Facets query | All distinct values, no pagination | Fine for <1000 unique values |
+| Suggestions | N+1 loop for sample descriptions | Slow with many pending suggestions |
+| Vendor rule rebuild | O(n²) ambiguity resolution | Fine for <1000 vendors |
+| top_vendors stat | Loads all, sorts in Python | Should be SQL ORDER BY + LIMIT |
+
+---
+
 ## Test Coverage
 
 **Backend tests:** None
@@ -225,9 +291,14 @@ This is the single biggest gap. Any refactoring or new feature risks breaking ex
 2. **Pin dependency versions** — Lock `requirements.txt` and verify `package-lock.json` is committed
 3. **Add authentication** — Even basic API key or session auth before exposing beyond localhost
 4. **Extract API base URL** — Use `NEXT_PUBLIC_API_URL` env variable
-5. **Add ORM relationships** — Enable eager loading, fix N+1 queries
+5. **Add ORM relationships** — Enable eager loading, fix N+1 queries (properties + suggestions)
 6. **Add React error boundary** — Prevent full-page crashes
 7. **Remove dead code** — Delete unused `edit-transaction-dialog.tsx`
 8. **Add structured logging** — Python `logging` module with configurable levels
 9. **Consider soft deletes** — Flag records as deleted rather than cascade removing
 10. **Add file upload validation** — Size limits, MIME type checking
+11. **Add audit timestamps** — `created_at`/`updated_at` on Transaction model for change tracking
+12. **Cache stats endpoints** — Even 60-second TTL prevents redundant full-table scans
+13. **Batch suggestion queries** — Replace N+1 loop with single batch fetch for sample descriptions
+14. **Extract constants** — Move magic numbers (confidence thresholds, pattern lengths) to config
+15. **Add server-side pagination** — Enforce max `limit` on `/transactions` to prevent unbounded memory usage

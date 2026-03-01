@@ -1,12 +1,26 @@
 # Development Roadmap — Finance Dashboard
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28
 
 ---
 
 ## How to Use This Document
 
 This roadmap is organized into phases. Each phase contains discrete tasks that an LLM coder can pick up independently. Tasks are written as clear instructions with context about *what* to change and *why*. Reference the [REVIEW.md](./REVIEW.md) for detailed findings.
+
+---
+
+## Completed Tasks
+
+These tasks are already implemented and should not be re-done. Listed here for context.
+
+| Task | Implemented In | Notes |
+|------|---------------|-------|
+| Scheduled CSV import (was 7.1) | `src/watcher.py` | Folder watcher monitors `inbox/{AccountName}/`, auto-imports, moves to `processed/`. Thread-safe logging. Lifespan-managed. Status/log endpoints: `GET /watcher/status`, `GET /watcher/log`. |
+| Suggestion review queue | `src/api.py`, `frontend/components/suggestion-banner.tsx` | Auto-categorization generates pending suggestions. Banner UI for approve/edit/dismiss individually or batch approve-all. Endpoints: `GET /suggestions`, `POST /suggestions/{id}/approve`, `POST /suggestions/{id}/dismiss`, `POST /suggestions/approve-all`. |
+| Dark mode toggle | `frontend/app/nav.tsx`, `frontend/app/globals.css` | Theme toggle in NavBar using `next-themes`. OKLCH color variables for light/dark. |
+| Vendor management with rules | `frontend/app/management/page.tsx`, `src/api.py` | Card grid UI with pattern editing, confidence badges. Rebuild-rules and import-from-transactions endpoints. |
+| Property/tenant CRUD | `frontend/app/management/page.tsx`, `src/api.py` | Full CRUD with cascade deletes, lease tracking, monthly rent. |
 
 ---
 
@@ -38,6 +52,22 @@ These tasks fix critical gaps and create the safety net for all future work.
 **Files:** `src/api.py`
 **Task:** Read allowed origins from `CORS_ORIGINS` env variable (comma-separated) instead of hardcoding `http://localhost:3000`. Default to `http://localhost:3000` if not set.
 
+### 0.7 — Add Audit Timestamps to Transaction Model
+**Files:** `src/models.py`, DB migration
+**Task:** Add `created_at` (server_default=now) and `updated_at` (onupdate=now) columns to the `transactions` table. Enables tracking when records were imported and last modified. Requires `ALTER TABLE` until Alembic is set up (Phase 8.2).
+
+### 0.8 — Extract Magic Numbers to Constants
+**Files:** `src/importer.py`, `src/api.py`
+**Task:** Move hardcoded values to a `src/constants.py` or top-of-file constants:
+- Confidence thresholds: `AUTO_ASSIGN_THRESHOLD = 0.85`, `MIN_CONFIDENCE = 0.70`
+- Pattern prefix length: `DESCRIPTION_PREFIX_LENGTH = 30`
+- Noise word list → separate constant or config file
+- Watcher stability delay: `FILE_STABILITY_SECONDS = 2`
+
+### 0.9 — Centralize Frontend API Client
+**Files:** New `frontend/lib/api.ts`, all files with `axios.get/post/put/patch/delete` calls
+**Task:** Create an axios instance in `frontend/lib/api.ts` with base URL from `NEXT_PUBLIC_API_URL`, default timeout, and account_id interceptor. Replace all raw axios calls across the frontend. This also sets up the foundation for adding auth headers (Phase 2.1).
+
 ---
 
 ## Phase 1: Testing
@@ -65,6 +95,32 @@ These tasks fix critical gaps and create the safety net for all future work.
 ### 1.3 — Add Pre-commit Linting
 **Files:** Root config files
 **Task:** Add a pre-commit hook that runs `ruff check` (Python) and `eslint` (frontend) before each commit. Prevents regressions from being committed.
+
+---
+
+## Phase 1.5: Performance & Query Fixes
+
+These are low-effort / high-impact fixes discovered during the 2026-02-28 deep analysis.
+
+### 1.5.1 — Fix N+1 Query in Suggestions Endpoint
+**Files:** `src/api.py` (GET `/suggestions`)
+**Task:** The current code loops over each suggestion and queries sample transaction descriptions individually. Refactor to batch-fetch all transaction descriptions in a single query, then distribute to suggestions in Python. Expected: O(1) queries instead of O(n).
+
+### 1.5.2 — Fix top_vendors SQL Sort
+**Files:** `src/api.py` (GET `/stats/top_vendors`)
+**Task:** Currently loads ALL vendor amounts into Python and sorts client-side. Replace with SQL `ORDER BY abs(total) DESC LIMIT :n` to push sorting to the database. Reduces memory usage and improves response time.
+
+### 1.5.3 — Add Stats Endpoint Caching
+**Files:** `src/api.py` (all `/stats/*` endpoints)
+**Task:** Add a simple TTL cache (60-second expiry, keyed by `account_id + endpoint + params`). Options: `cachetools.TTLCache` in-process, or a custom decorator. Every chart request currently triggers a full table scan — caching prevents redundant work when users navigate back and forth to the analysis page.
+
+### 1.5.4 — Log Malformed CSV Rows
+**Files:** `src/importer.py`
+**Task:** Currently malformed rows are silently skipped during CSV import. Add structured logging that records: row number, column that failed parsing, and the error type. Do NOT log row content (privacy). Return a `warnings` array in the import response so the frontend can display "X rows skipped due to parse errors".
+
+### 1.5.5 — Add Server-Side Pagination Guard
+**Files:** `src/api.py` (GET `/transactions`)
+**Task:** Add a `MAX_LIMIT = 5000` constant. If no `limit` is provided, default to `MAX_LIMIT`. If `limit` exceeds `MAX_LIMIT`, cap it. This prevents unbounded memory usage while still allowing the frontend to load all data for client-side filtering (current architecture). Add `X-Total-Count` response header for future frontend pagination support.
 
 ---
 
@@ -157,9 +213,8 @@ Display as a projected 3-month chart.
 - Tablet (768-1024px): Condensed table with fewer columns, collapsible sidebar panel
 - Keep desktop layout unchanged
 
-### 5.3 — Dark Mode
-**Files:** `frontend/app/layout.tsx`, `frontend/app/globals.css`
-**Task:** The project already includes `next-themes` and has CSS variables for dark mode in `globals.css`. Wire up a theme toggle button in the NavBar. Verify all components render correctly in dark mode.
+### 5.3 — ~~Dark Mode~~ DONE
+> Already implemented. Theme toggle in NavBar using `next-themes`. OKLCH color variables in `globals.css`. See Completed Tasks above.
 
 ### 5.4 — Optimistic UI Updates
 **Files:** `frontend/components/transaction-panel.tsx`, `frontend/components/bulk-edit-dialog.tsx`
@@ -198,9 +253,8 @@ This makes the UI feel instant instead of waiting for server response.
 
 ## Phase 7: Automation & Intelligence
 
-### 7.1 — Scheduled CSV Import
-**Files:** New background job system
-**Task:** Add a file watcher or scheduled job that checks a designated folder for new CSV files and imports them automatically. Notify via the frontend (polling or WebSocket) when new transactions are available.
+### 7.1 — ~~Scheduled CSV Import~~ DONE
+> Already implemented in `src/watcher.py`. See Completed Tasks above. Frontend polls `/watcher/status` every 30s, shows green dot + unseen import count badge in NavBar.
 
 ### 7.2 — Improved Auto-Categorization
 **Files:** `src/importer.py`
@@ -255,36 +309,47 @@ This makes the UI feel instant instead of waiting for server response.
 ## Task Dependency Graph
 
 ```
-Phase 0 (Foundation)
+Phase 0 (Foundation) — all independent, do in any order
   ├── 0.1 Pin versions
-  ├── 0.2 API URL env var
-  ├── 0.3 ORM relationships
-  ├── 0.4 Remove dead code
-  ├── 0.5 Error boundary
-  └── 0.6 CORS env var
+  ├── 0.2 API URL env var ─┐
+  ├── 0.3 ORM relationships│
+  ├── 0.4 Remove dead code │
+  ├── 0.5 Error boundary   │
+  ├── 0.6 CORS env var     │
+  ├── 0.7 Audit timestamps │
+  ├── 0.8 Extract constants│
+  └── 0.9 API client ──────┘ (depends on 0.2)
         │
-Phase 1 (Testing) ← depends on Phase 0
-  ├── 1.1 Backend tests
-  ├── 1.2 Frontend tests
-  └── 1.3 Pre-commit hooks
+        ├── Phase 1 (Testing) ← depends on Phase 0
+        │   ├── 1.1 Backend tests
+        │   ├── 1.2 Frontend tests
+        │   └── 1.3 Pre-commit hooks
         │
-Phase 2 (Security) ← depends on Phase 0
-  ├── 2.1 Authentication
-  ├── 2.2 Fix race condition
-  ├── 2.3 Upload validation
-  ├── 2.4 Decimal currency
-  └── 2.5 Soft delete
+        ├── Phase 1.5 (Performance) ← independent of Phase 1, depends on Phase 0
+        │   ├── 1.5.1 Fix N+1 suggestions
+        │   ├── 1.5.2 Fix top_vendors SQL
+        │   ├── 1.5.3 Stats caching
+        │   ├── 1.5.4 Log CSV parse errors
+        │   └── 1.5.5 Pagination guard
         │
+        └── Phase 2 (Security) ← depends on Phase 0
+            ├── 2.1 Authentication ← 0.9 (API client) makes this easier
+            ├── 2.2 Fix race condition
+            ├── 2.3 Upload validation
+            ├── 2.4 Decimal currency
+            └── 2.5 Soft delete
+                │
 Phase 3 (Multi-bank) ← depends on 1.1
   ├── 3.1 Parser architecture
   ├── 3.2 Chase parser ← depends on 3.1
   └── 3.3 Generic parser ← depends on 3.1
         │
 Phase 4-7 (Features) ← can run in parallel after Phase 2
+  Note: 5.3 (Dark mode) and 7.1 (CSV watcher) already DONE
         │
 Phase 8 (Deployment) ← depends on Phase 2
   ├── 8.1 Production Docker
-  ├── 8.2 Alembic migrations
+  ├── 8.2 Alembic migrations (unblocks 0.7 for future columns)
   ├── 8.3 Backup script
   └── 8.4 Logging
 ```
@@ -299,3 +364,8 @@ Phase 8 (Deployment) ← depends on Phase 2
 - **Frontend State:** Filters persist in sessionStorage. Account selection persists in localStorage. Do not break these patterns.
 - **TanStack Table Meta:** Pass callbacks (onRefresh, openPanel) via the `meta` option in `useReactTable`. Components access them via `table.options.meta`.
 - **Undo Pattern:** Capture field snapshots before mutations. POST to `/transactions/bulk-restore` in the toast undo action.
+- **Vendor Confidence System:** Thresholds are 0.85 (auto-assign + cleaned) and 0.70 (auto-assign only). Formula: `1.0 - (corrected / max(assigned, 1))`. Correction tracking increments on manual vendor edits. Below 0.70 auto-disables the rule. Sign-aware rules store separate category/project per +/- sign.
+- **Import Pipeline:** CSV → `importer.py:import_csv_content()` → deduplicate by hash ID → apply vendor rules → generate `import_suggestions` for unmatched patterns. Watcher moves processed files to `processed/{TIMESTAMP}_{filename}`.
+- **Component Tree:** Layout → ThemeProvider → AccountProvider → NavBar + Page routes. Main page: SuggestionBanner + DataTable (BulkEditDialog, TransactionPanel with comboboxes). Analysis: Recharts charts + BudgetDialog. Report: aggregations + PDF/Excel export. Management: vendor cards + property/tenant CRUD.
+- **No Global State Library:** React Context for accounts only. Props for everything else. sessionStorage via `usePersistentState()` hook. This is intentional — do not introduce Redux/Zustand unless complexity demands it.
+- **Docker Ports:** Backend maps 8001→8000 (host→container). Database: 5432. Frontend: 3000.

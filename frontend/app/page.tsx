@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Transaction } from "@/types/transaction";
 import { DataTable } from "./data-table";
 import { columns } from "./columns";
@@ -23,8 +23,8 @@ export default function Home() {
     if (!activeAccount) return;
     setLoading(true);
     try {
-      const response = await axios.get(
-        `http://localhost:8001/transactions?account_id=${activeAccount.id}`
+      const response = await api.get(
+        `/transactions?account_id=${activeAccount.id}`
       );
       setTransactions(response.data);
     } catch {

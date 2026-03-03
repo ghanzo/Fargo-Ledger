@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { usePersistentState } from "@/hooks/use-persistent-state";
-import axios from "axios";
+import api from "@/lib/api";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,6 @@ import { Printer, Download, Table2, ChevronLeft, ChevronRight } from "lucide-rea
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const API = "http://localhost:8001";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(n));
@@ -70,8 +69,8 @@ export default function ReportPage() {
   useEffect(() => {
     if (!activeAccount) return;
     setLoading(true);
-    axios
-      .get(`${API}/transactions`, {
+    api
+      .get(`/transactions`, {
         params: { account_id: activeAccount.id, date_from: dateFrom, date_to: dateTo },
       })
       .then((res) => setTransactions(res.data))
@@ -209,8 +208,8 @@ export default function ReportPage() {
 
       // Fetch management data
       const [vendorRes, propsRes] = await Promise.all([
-        axios.get(`${API}/vendor-info?account_id=${activeAccount.id}`),
-        axios.get(`${API}/properties?account_id=${activeAccount.id}`),
+        api.get(`/vendor-info?account_id=${activeAccount.id}`),
+        api.get(`/properties?account_id=${activeAccount.id}`),
       ]);
       const vendors: VendorInfoData[]  = vendorRes.data;
       const properties: PropertyData[] = propsRes.data;
@@ -524,23 +523,23 @@ export default function ReportPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-zinc-50 print:bg-white">
+    <div className="min-h-screen bg-muted print:bg-background">
       {/* ── Screen-only controls bar ───────────────────────────────── */}
-      <div className="print:hidden bg-white border-b px-8 py-3 flex items-center gap-4 flex-wrap">
+      <div className="print:hidden bg-background border-b px-8 py-3 flex items-center gap-4 flex-wrap">
         {/* Year selector */}
         <div className="flex items-center gap-1">
-          <button onClick={() => setYear((y) => y - 1)} className="p-1 rounded hover:bg-zinc-100">
+          <button onClick={() => setYear((y) => y - 1)} className="p-1 rounded hover:bg-muted">
             <ChevronLeft className="h-4 w-4" />
           </button>
           <span className="text-sm font-semibold w-[52px] text-center tabular-nums">{year}</span>
-          <button onClick={() => setYear((y) => y + 1)} className="p-1 rounded hover:bg-zinc-100">
+          <button onClick={() => setYear((y) => y + 1)} className="p-1 rounded hover:bg-muted">
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
 
         {/* Beginning balance */}
         <div className="flex items-center gap-2">
-          <span className="text-sm text-zinc-500 whitespace-nowrap">Beginning Balance:</span>
+          <span className="text-sm text-muted-foreground whitespace-nowrap">Beginning Balance:</span>
           <Input
             className="w-36 h-8 text-sm"
             placeholder="$0.00"
@@ -549,7 +548,7 @@ export default function ReportPage() {
           />
         </div>
 
-        {loading && <span className="text-xs text-zinc-400">Loading...</span>}
+        {loading && <span className="text-xs text-muted-foreground">Loading...</span>}
 
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={saveExcel} disabled={exporting} className="gap-2">
@@ -572,30 +571,30 @@ export default function ReportPage() {
 
         {/* 1. HEADER */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-zinc-900">{activeAccount?.name ?? "—"}</h1>
-          <h2 className="text-lg font-bold text-zinc-800 mt-1">Income Statement for {year}</h2>
-          <div className="mt-2 text-xs text-zinc-400">Generated: {generatedDate}</div>
+          <h1 className="text-3xl font-bold text-foreground">{activeAccount?.name ?? "—"}</h1>
+          <h2 className="text-lg font-bold text-foreground mt-1">Income Statement for {year}</h2>
+          <div className="mt-2 text-xs text-muted-foreground">Generated: {generatedDate}</div>
           <div className="mt-3 border-b-2 border-zinc-900" />
         </div>
 
         {/* 2. SUMMARY TABLE */}
         <section className="mb-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-3">Properties</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-3">Properties</h2>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-zinc-300">
-                <th className="text-left pb-1.5 font-semibold text-zinc-700">Property</th>
-                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Income</th>
-                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Expenses</th>
-                <th className="text-right pb-1.5 font-semibold text-zinc-700 w-32">Net</th>
+              <tr className="border-b border-border">
+                <th className="text-left pb-1.5 font-semibold text-foreground">Property</th>
+                <th className="text-right pb-1.5 font-semibold text-foreground w-32">Income</th>
+                <th className="text-right pb-1.5 font-semibold text-foreground w-32">Expenses</th>
+                <th className="text-right pb-1.5 font-semibold text-foreground w-32">Net</th>
               </tr>
             </thead>
             <tbody>
               {propertyList.map(([key, prop]) => (
-                <tr key={key} className="border-b border-zinc-100">
-                  <td className="py-1.5 text-zinc-800">{prop.label}</td>
+                <tr key={key} className="border-b border-border">
+                  <td className="py-1.5 text-foreground">{prop.label}</td>
                   <td className="py-1.5 text-right tabular-nums text-emerald-700">{fmt(prop.totalIncome)}</td>
-                  <td className="py-1.5 text-right tabular-nums text-zinc-700">{prop.totalExpenses > 0 ? `(${fmt(prop.totalExpenses)})` : "—"}</td>
+                  <td className="py-1.5 text-right tabular-nums text-foreground">{prop.totalExpenses > 0 ? `(${fmt(prop.totalExpenses)})` : "—"}</td>
                   <td className={`py-1.5 text-right tabular-nums font-medium ${prop.net >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                     {prop.net >= 0 ? fmt(prop.net) : `(${fmt(prop.net)})`}
                   </td>
@@ -604,9 +603,9 @@ export default function ReportPage() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-zinc-400">
-                <td className="pt-2 font-bold text-zinc-900 uppercase tracking-wide text-xs">Total</td>
+                <td className="pt-2 font-bold text-foreground uppercase tracking-wide text-xs">Total</td>
                 <td className="pt-2 text-right tabular-nums font-bold text-emerald-700">{fmt(totalIncome)}</td>
-                <td className="pt-2 text-right tabular-nums font-bold text-zinc-700">{totalExpenses > 0 ? `(${fmt(totalExpenses)})` : "—"}</td>
+                <td className="pt-2 text-right tabular-nums font-bold text-foreground">{totalExpenses > 0 ? `(${fmt(totalExpenses)})` : "—"}</td>
                 <td className={`pt-2 text-right tabular-nums font-bold ${netIncome >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                   {netIncome >= 0 ? fmt(netIncome) : `(${fmt(netIncome)})`}
                 </td>
@@ -617,33 +616,33 @@ export default function ReportPage() {
 
         {/* 3. INCOME STATEMENTS — per property */}
         <section className="mb-10">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4">Income Statements</h2>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Income Statements</h2>
           <div className="space-y-8">
             {propertyList.map(([key, prop]) => (
               <div key={key} className="print:break-inside-avoid">
                 {/* Property heading */}
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-1 h-5 bg-zinc-800 rounded-sm" />
-                  <span className="font-bold text-sm uppercase tracking-wide text-zinc-800">{prop.label}</span>
+                  <span className="font-bold text-sm uppercase tracking-wide text-foreground">{prop.label}</span>
                 </div>
 
                 <div className="ml-4 space-y-4">
                   {/* INCOME */}
                   {prop.income.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">Income</div>
+                      <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Income</div>
                       <table className="w-full text-sm">
                         <tbody>
                           {prop.income.map((line) => (
                             <tr key={line.label}>
-                              <td className="py-0.5 pl-4 text-zinc-700">{line.label}</td>
+                              <td className="py-0.5 pl-4 text-foreground">{line.label}</td>
                               <td className="py-0.5 text-right tabular-nums text-emerald-700 w-36">{fmt(line.amount)}</td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr className="border-t border-zinc-300">
-                            <td className="pt-1 pl-4 font-semibold text-zinc-800">Total Income</td>
+                          <tr className="border-t border-border">
+                            <td className="pt-1 pl-4 font-semibold text-foreground">Total Income</td>
                             <td className="pt-1 text-right tabular-nums font-semibold text-emerald-700 w-36">{fmt(prop.totalIncome)}</td>
                           </tr>
                         </tfoot>
@@ -654,20 +653,20 @@ export default function ReportPage() {
                   {/* EXPENSES */}
                   {prop.expenses.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">Expenses</div>
+                      <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Expenses</div>
                       <table className="w-full text-sm">
                         <tbody>
                           {prop.expenses.map((line) => (
                             <tr key={line.label}>
-                              <td className="py-0.5 pl-4 text-zinc-700">{line.label}</td>
-                              <td className="py-0.5 text-right tabular-nums text-zinc-700 w-36">({fmt(line.amount)})</td>
+                              <td className="py-0.5 pl-4 text-foreground">{line.label}</td>
+                              <td className="py-0.5 text-right tabular-nums text-foreground w-36">({fmt(line.amount)})</td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr className="border-t border-zinc-300">
-                            <td className="pt-1 pl-4 font-semibold text-zinc-800">Total Expenses</td>
-                            <td className="pt-1 text-right tabular-nums font-semibold text-zinc-700 w-36">({fmt(prop.totalExpenses)})</td>
+                          <tr className="border-t border-border">
+                            <td className="pt-1 pl-4 font-semibold text-foreground">Total Expenses</td>
+                            <td className="pt-1 text-right tabular-nums font-semibold text-foreground w-36">({fmt(prop.totalExpenses)})</td>
                           </tr>
                         </tfoot>
                       </table>
@@ -676,7 +675,7 @@ export default function ReportPage() {
 
                   {/* NET INCOME */}
                   <div className="border-t-2 border-zinc-400 pt-2 flex justify-between items-center">
-                    <span className="font-bold text-zinc-900">Net Income {prop.label}</span>
+                    <span className="font-bold text-foreground">Net Income {prop.label}</span>
                     <span className={`font-bold tabular-nums text-sm ${prop.net >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                       {prop.net >= 0 ? fmt(prop.net) : `(${fmt(prop.net)})`}
                     </span>
@@ -689,33 +688,33 @@ export default function ReportPage() {
 
         {/* 4. RECONCILIATION */}
         <section className="print:break-inside-avoid">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-3">Reconciliation</h2>
-          <div className="border-t border-b border-zinc-300 py-3 space-y-1.5 text-sm">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-3">Reconciliation</h2>
+          <div className="border-t border-b border-border py-3 space-y-1.5 text-sm">
             <div className="flex justify-between">
-              <span className="text-zinc-600">Beginning Balance (Jan 1, {year})</span>
-              <span className="tabular-nums font-medium text-zinc-800">{fmt(beginBal)}</span>
+              <span className="text-muted-foreground">Beginning Balance (Jan 1, {year})</span>
+              <span className="tabular-nums font-medium text-foreground">{fmt(beginBal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-zinc-600">+ Net Income</span>
+              <span className="text-muted-foreground">+ Net Income</span>
               <span className={`tabular-nums font-medium ${netIncome >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                 {netIncome >= 0 ? fmt(netIncome) : `(${fmt(netIncome)})`}
               </span>
             </div>
             {transfersIn > 0 && (
               <div className="flex justify-between">
-                <span className="text-zinc-600">+ Transfers In</span>
-                <span className="tabular-nums font-medium text-zinc-700">{fmt(transfersIn)}</span>
+                <span className="text-muted-foreground">+ Transfers In</span>
+                <span className="tabular-nums font-medium text-foreground">{fmt(transfersIn)}</span>
               </div>
             )}
             {transfersOut > 0 && (
               <div className="flex justify-between">
-                <span className="text-zinc-600">− Transfers Out</span>
-                <span className="tabular-nums font-medium text-zinc-700">({fmt(transfersOut)})</span>
+                <span className="text-muted-foreground">− Transfers Out</span>
+                <span className="tabular-nums font-medium text-foreground">({fmt(transfersOut)})</span>
               </div>
             )}
           </div>
           <div className="border-b-2 border-zinc-400 pt-2 pb-2 flex justify-between items-center">
-            <span className="font-bold text-zinc-900">Ending Balance (Dec 31, {year})</span>
+            <span className="font-bold text-foreground">Ending Balance (Dec 31, {year})</span>
             <span className={`font-bold tabular-nums ${endingBal >= 0 ? "text-emerald-700" : "text-red-600"}`}>
               {endingBal >= 0 ? fmt(endingBal) : `(${fmt(endingBal)})`}
             </span>
@@ -724,7 +723,7 @@ export default function ReportPage() {
 
         {/* 5. TRANSACTIONS BY PROPERTY */}
         <section className="mt-12 mb-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-4">Transactions by Property</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-4">Transactions by Property</h2>
           <div className="space-y-8">
             {txByPropertyList.map(([key, { label, txs }]) => {
               const subtotal = txs.reduce((s, tx) => s + parseFloat(String(tx.amount)), 0);
@@ -732,36 +731,36 @@ export default function ReportPage() {
                 <div key={key} className="print:break-inside-avoid">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-1 h-4 bg-zinc-800 rounded-sm" />
-                    <span className="font-bold text-sm text-zinc-800">{label}</span>
-                    <span className="text-xs text-zinc-400">({txs.length} transactions)</span>
+                    <span className="font-bold text-sm text-foreground">{label}</span>
+                    <span className="text-xs text-muted-foreground">({txs.length} transactions)</span>
                   </div>
                   <table className="w-full text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-zinc-200">
-                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Date</th>
-                        <th className="text-left pb-1.5 font-medium text-zinc-400">Description</th>
-                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Vendor</th>
-                        <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Category</th>
-                        <th className="text-right pb-1.5 font-medium text-zinc-400 w-28">Amount</th>
+                      <tr className="border-b border-border">
+                        <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Date</th>
+                        <th className="text-left pb-1.5 font-medium text-muted-foreground">Description</th>
+                        <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Vendor</th>
+                        <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Category</th>
+                        <th className="text-right pb-1.5 font-medium text-muted-foreground w-28">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
                       {txs.map((tx) => {
                         const amount     = parseFloat(String(tx.amount));
                         const isTransfer = tx.is_transfer;
-                        const amtClass   = isTransfer ? "text-zinc-400" : amount > 0 ? "text-emerald-600" : "text-zinc-700";
+                        const amtClass   = isTransfer ? "text-muted-foreground" : amount > 0 ? "text-emerald-600" : "text-foreground";
                         return (
                           <tr key={tx.id} className="border-b border-zinc-50">
-                            <td className="py-1 pr-2 font-mono text-zinc-400 whitespace-nowrap">{tx.transaction_date}</td>
-                            <td className="py-1 pr-2 text-zinc-700 max-w-[240px] truncate">{tx.description}</td>
-                            <td className="py-1 pr-2 text-zinc-500 truncate">{tx.vendor ?? <span className="text-zinc-300">—</span>}</td>
+                            <td className="py-1 pr-2 font-mono text-muted-foreground whitespace-nowrap">{tx.transaction_date}</td>
+                            <td className="py-1 pr-2 text-foreground max-w-[240px] truncate">{tx.description}</td>
+                            <td className="py-1 pr-2 text-muted-foreground truncate">{tx.vendor ?? <span className="text-muted-foreground">—</span>}</td>
                             <td className="py-1 pr-2">
                               {tx.category ? (
                                 <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{tx.category}</span>
                               ) : isTransfer ? (
-                                <span className="inline-flex px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 whitespace-nowrap">Transfer</span>
+                                <span className="inline-flex px-1.5 py-0.5 rounded bg-muted text-muted-foreground whitespace-nowrap">Transfer</span>
                               ) : (
-                                <span className="text-zinc-300">—</span>
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </td>
                             <td className={`py-1 text-right font-mono tabular-nums ${amtClass}`}>
@@ -772,9 +771,9 @@ export default function ReportPage() {
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-zinc-300">
-                        <td colSpan={4} className="pt-1.5 pr-2 text-right font-semibold text-zinc-700">Subtotal</td>
-                        <td className={`pt-1.5 text-right font-semibold font-mono tabular-nums ${subtotal >= 0 ? "text-emerald-700" : "text-zinc-700"}`}>
+                      <tr className="border-t-2 border-border">
+                        <td colSpan={4} className="pt-1.5 pr-2 text-right font-semibold text-foreground">Subtotal</td>
+                        <td className={`pt-1.5 text-right font-semibold font-mono tabular-nums ${subtotal >= 0 ? "text-emerald-700" : "text-foreground"}`}>
                           {subtotal >= 0 ? "+" : "−"}{fmt(subtotal)}
                         </td>
                       </tr>
@@ -788,43 +787,43 @@ export default function ReportPage() {
 
         {/* 6. ALL TRANSACTIONS BY DATE */}
         <section className="mt-12">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-700 mb-4">All Transactions by Date</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-4">All Transactions by Date</h2>
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="border-b-2 border-zinc-300">
-                <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Date</th>
-                <th className="text-left pb-1.5 font-medium text-zinc-400 w-24">Property</th>
-                <th className="text-left pb-1.5 font-medium text-zinc-400">Description</th>
-                <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Vendor</th>
-                <th className="text-left pb-1.5 font-medium text-zinc-400 w-28">Category</th>
-                <th className="text-right pb-1.5 font-medium text-zinc-400 w-24">Amount</th>
-                <th className="text-right pb-1.5 font-medium text-zinc-400 w-28">Balance</th>
+              <tr className="border-b-2 border-border">
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Date</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Property</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground">Description</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Vendor</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Category</th>
+                <th className="text-right pb-1.5 font-medium text-muted-foreground w-24">Amount</th>
+                <th className="text-right pb-1.5 font-medium text-muted-foreground w-28">Balance</th>
               </tr>
             </thead>
             <tbody>
               {txByDateWithBalance.map(({ tx, runningBal }) => {
                 const amount     = parseFloat(String(tx.amount));
                 const isTransfer = tx.is_transfer;
-                const amtClass   = isTransfer ? "text-zinc-400" : amount > 0 ? "text-emerald-600" : "text-zinc-700";
+                const amtClass   = isTransfer ? "text-muted-foreground" : amount > 0 ? "text-emerald-600" : "text-foreground";
                 return (
                   <tr key={tx.id} className="border-b border-zinc-50">
-                    <td className="py-1 pr-2 font-mono text-zinc-400 whitespace-nowrap">{tx.transaction_date}</td>
-                    <td className="py-1 pr-2 text-zinc-500 truncate">{tx.project ?? <span className="text-zinc-300">—</span>}</td>
-                    <td className="py-1 pr-2 text-zinc-700 max-w-[200px] truncate">{tx.description}</td>
-                    <td className="py-1 pr-2 text-zinc-500 truncate">{tx.vendor ?? <span className="text-zinc-300">—</span>}</td>
+                    <td className="py-1 pr-2 font-mono text-muted-foreground whitespace-nowrap">{tx.transaction_date}</td>
+                    <td className="py-1 pr-2 text-muted-foreground truncate">{tx.project ?? <span className="text-muted-foreground">—</span>}</td>
+                    <td className="py-1 pr-2 text-foreground max-w-[200px] truncate">{tx.description}</td>
+                    <td className="py-1 pr-2 text-muted-foreground truncate">{tx.vendor ?? <span className="text-muted-foreground">—</span>}</td>
                     <td className="py-1 pr-2">
                       {tx.category ? (
                         <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{tx.category}</span>
                       ) : isTransfer ? (
-                        <span className="inline-flex px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 whitespace-nowrap">Transfer</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-muted text-muted-foreground whitespace-nowrap">Transfer</span>
                       ) : (
-                        <span className="text-zinc-300">—</span>
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </td>
                     <td className={`py-1 text-right font-mono tabular-nums ${amtClass}`}>
                       {amount >= 0 ? "+" : "−"}{fmt(amount)}
                     </td>
-                    <td className={`py-1 text-right font-mono tabular-nums font-medium ${runningBal >= 0 ? "text-zinc-700" : "text-red-600"}`}>
+                    <td className={`py-1 text-right font-mono tabular-nums font-medium ${runningBal >= 0 ? "text-foreground" : "text-red-600"}`}>
                       {fmt(runningBal)}
                     </td>
                   </tr>
@@ -833,7 +832,7 @@ export default function ReportPage() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-zinc-400">
-                <td colSpan={5} className="pt-2 font-bold text-zinc-900 text-sm">Ending Balance (Dec 31, {year})</td>
+                <td colSpan={5} className="pt-2 font-bold text-foreground text-sm">Ending Balance (Dec 31, {year})</td>
                 <td colSpan={2} className={`pt-2 text-right font-bold font-mono tabular-nums text-sm ${endingBal >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                   {fmt(endingBal)}
                 </td>

@@ -58,6 +58,8 @@ class TransactionResponse(BaseModel):
     is_transfer:      bool                = False
     is_cleaned:       bool
     auto_categorized: bool                = False
+    created_at:       Optional[datetime]  = None
+    updated_at:       Optional[datetime]  = None
 
     class Config:
         from_attributes = True

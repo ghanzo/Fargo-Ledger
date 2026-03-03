@@ -8,7 +8,7 @@ import { useAccount } from "@/context/account-context";
 import { AccountManagerDialog } from "@/components/account-manager-dialog";
 import { Sun, Moon, FolderInput } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API ?? "http://localhost:8001";
+import api from "@/lib/api";
 const POLL_INTERVAL = 30_000;
 
 interface WatcherLogEntry {
@@ -44,9 +44,8 @@ export function NavBar() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/watcher/status`);
-      if (!res.ok) return;
-      const data: WatcherStatus = await res.json();
+      const res = await api.get<WatcherStatus>("/watcher/status");
+      const data = res.data;
       setWatcherStatus(data);
 
       // Count entries newer than the last-seen timestamp

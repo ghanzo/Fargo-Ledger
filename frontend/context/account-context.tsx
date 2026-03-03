@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 
 export interface Account {
   id: number;
@@ -23,7 +23,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      const res = await axios.get("http://localhost:8001/accounts");
+      const res = await api.get("/accounts");
       const fetched: Account[] = res.data;
       setAccounts(fetched);
 

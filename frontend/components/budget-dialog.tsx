@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
   const fetchBudgets = async () => {
     if (!activeAccount) return;
     try {
-      const res = await axios.get(`http://localhost:8001/budgets?account_id=${activeAccount.id}`);
+      const res = await api.get(`/budgets?account_id=${activeAccount.id}`);
       setBudgets(res.data);
     } catch {
       toast.error("Failed to load budgets");
@@ -48,7 +48,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
     if (isNaN(numLimit) || numLimit <= 0) { toast.error("Enter a valid monthly limit"); return; }
     setLoading(true);
     try {
-      await axios.post(`http://localhost:8001/budgets?account_id=${activeAccount.id}`, { category, monthly_limit: numLimit });
+      await api.post(`/budgets?account_id=${activeAccount.id}`, { category, monthly_limit: numLimit });
       setCategory(""); setLimit("");
       await fetchBudgets();
       onSaved?.();
@@ -63,7 +63,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
     const num = parseFloat(newLimit);
     if (isNaN(num) || num <= 0) return;
     try {
-      await axios.put(`http://localhost:8001/budgets/${id}`, { monthly_limit: num });
+      await api.put(`/budgets/${id}`, { monthly_limit: num });
       await fetchBudgets();
       onSaved?.();
     } catch {
@@ -73,7 +73,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8001/budgets/${id}`);
+      await api.delete(`/budgets/${id}`);
       await fetchBudgets();
       onSaved?.();
     } catch {
@@ -93,8 +93,8 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
           <div className="divide-y border rounded-lg mb-4">
             {budgets.map((b) => (
               <div key={b.id} className="flex items-center gap-3 px-3 py-2">
-                <span className="flex-1 text-sm font-medium text-zinc-700">{b.category}</span>
-                <span className="text-xs text-zinc-400 mr-1">$/mo</span>
+                <span className="flex-1 text-sm font-medium text-foreground">{b.category}</span>
+                <span className="text-xs text-muted-foreground mr-1">$/mo</span>
                 <Input
                   type="number"
                   defaultValue={b.monthly_limit}
@@ -105,7 +105,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
                 />
                 <button
                   onClick={() => handleDelete(b.id)}
-                  className="text-zinc-300 hover:text-red-500 transition-colors ml-1"
+                  className="text-muted-foreground hover:text-red-500 transition-colors ml-1"
                   title="Delete budget"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -116,14 +116,14 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
         )}
 
         {budgets.length === 0 && (
-          <p className="text-sm text-zinc-400 text-center py-4">
+          <p className="text-sm text-muted-foreground text-center py-4">
             No budgets yet — add one below.
           </p>
         )}
 
         {/* Add new budget */}
-        <div className="border rounded-lg p-3 bg-zinc-50">
-          <p className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wide">Add Budget</p>
+        <div className="border rounded-lg p-3 bg-muted">
+          <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Add Budget</p>
           <div className="flex gap-2 items-end">
             <div className="flex-1 grid gap-1">
               <Label className="text-xs">Category</Label>

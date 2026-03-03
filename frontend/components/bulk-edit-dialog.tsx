@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -65,8 +65,8 @@ export function BulkEditDialog({
       if (isTransfer    !== null) updateData.is_transfer    = isTransfer;
       updateData.is_cleaned = true;
 
-      await axios.patch(
-        `http://localhost:8001/transactions/bulk?account_id=${activeAccount?.id}`,
+      await api.patch(
+        `/transactions/bulk?account_id=${activeAccount?.id}`,
         { ids: selectedIds, update_data: updateData },
       );
 
@@ -80,7 +80,7 @@ export function BulkEditDialog({
           label: "Undo",
           onClick: async () => {
             try {
-              await axios.post("http://localhost:8001/transactions/bulk-restore", snapshots);
+              await api.post("/transactions/bulk-restore", snapshots);
               toast.success("Reverted changes");
               onSuccess(); // refresh the table
             } catch {
@@ -109,7 +109,7 @@ export function BulkEditDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-muted-foreground">
             Leave any field empty to keep existing values unchanged.
           </p>
 
@@ -146,7 +146,7 @@ export function BulkEditDialog({
             <Label>Tax Deductible</Label>
             <div className="flex gap-2">
               {([
-                [null,  "No Change", "bg-zinc-900 text-white border-zinc-900"],
+                [null,  "No Change", "bg-foreground text-background border-foreground"],
                 [true,  "Yes",       "bg-emerald-600 text-white border-emerald-600"],
                 [false, "No",        "bg-red-500 text-white border-red-500"],
               ] as const).map(([val, label, activeClass]) => (
@@ -157,7 +157,7 @@ export function BulkEditDialog({
                   className={`text-xs px-3 py-1 rounded border transition-colors ${
                     taxDeductible === val
                       ? activeClass
-                      : "border-zinc-200 text-zinc-500 hover:border-zinc-400"
+                      : "border-border text-muted-foreground hover:border-ring"
                   }`}
                 >
                   {label}
@@ -170,8 +170,8 @@ export function BulkEditDialog({
             <Label>Transfer</Label>
             <div className="flex gap-2">
               {([
-                [null,  "No Change", "bg-zinc-900 text-white border-zinc-900"],
-                [true,  "Yes",       "bg-zinc-500 text-white border-zinc-500"],
+                [null,  "No Change", "bg-foreground text-background border-foreground"],
+                [true,  "Yes",       "bg-muted-foreground text-background border-muted-foreground"],
                 [false, "No",        "bg-red-500 text-white border-red-500"],
               ] as const).map(([val, label, activeClass]) => (
                 <button
@@ -181,7 +181,7 @@ export function BulkEditDialog({
                   className={`text-xs px-3 py-1 rounded border transition-colors ${
                     isTransfer === val
                       ? activeClass
-                      : "border-zinc-200 text-zinc-500 hover:border-zinc-400"
+                      : "border-border text-muted-foreground hover:border-ring"
                   }`}
                 >
                   {label}

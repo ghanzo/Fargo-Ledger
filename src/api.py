@@ -1,9 +1,10 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from sqlalchemy import func
 from datetime import date
@@ -20,10 +21,12 @@ from src.schemas import (
     TenantCreate, TenantUpdate, TenantResponse,
     ImportSuggestionResponse, SuggestionApproveBody,
 )
-from src.importer import import_csv_content, extract_description_patterns
+from src.importer import import_csv_content, extract_description_patterns, _CONFIDENCE_ASSIGN_THRESHOLD
 from src import watcher
 
 logging.basicConfig(level=logging.INFO)
+
+_SUBSCRIPTION_TOLERANCE = 0.30
 
 Base.metadata.create_all(bind=engine)
 
@@ -37,9 +40,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Finance API", lifespan=lifespan)
 
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -205,7 +214,7 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
                 confidence       = round(1.0 - (corrected / max(assigned, 1)), 4)
                 rules["corrected_count"] = corrected
                 rules["confidence"]      = confidence
-                if confidence < 0.70:
+                if confidence < _CONFIDENCE_ASSIGN_THRESHOLD:
                     rules["enabled"] = False
                 vi.rules = rules
 
@@ -429,13 +438,16 @@ def suggest_categorization(tx_id: str, db: Session = Depends(get_db)):
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Match on first 30 chars of description — enough to identify the merchant
-    prefix = (tx.description or "")[:30]
+    _PREFIX_LEN = 30
+    _MAX_SIMILAR = 30
+
+    # Match on first N chars of description — enough to identify the merchant
+    prefix = (tx.description or "")[:_PREFIX_LEN]
     similar = db.query(Transaction).filter(
         Transaction.id != tx_id,
         Transaction.description.ilike(f"%{prefix}%"),
         Transaction.vendor != None,
-    ).limit(30).all()
+    ).limit(_MAX_SIMILAR).all()
 
     if not similar:
         return {"vendor": None, "category": None}
@@ -621,7 +633,7 @@ def get_subscriptions(
         totals      = list(months_data.values())
         avg_monthly = sum(totals) / len(totals)
         likely = avg_monthly > 0 and all(
-            abs(t - avg_monthly) / avg_monthly < 0.30 for t in totals
+            abs(t - avg_monthly) / avg_monthly < _SUBSCRIPTION_TOLERANCE for t in totals
         )
         subscriptions.append({
             "vendor":              vendor,
@@ -876,7 +888,7 @@ def rebuild_vendor_rules(account_id: int = Query(...), db: Session = Depends(get
         confidence     = round(1.0 - (corrected / max(assigned, 1)), 4)
         # Only auto-disable on rebuild if confidence is very low; let the user re-enable
         was_disabled   = existing.get("enabled") is False
-        enabled        = (not was_disabled) and confidence >= 0.70
+        enabled        = (not was_disabled) and confidence >= _CONFIDENCE_ASSIGN_THRESHOLD
 
         vi.rules = {
             "patterns":         sorted(pattern_set),
@@ -947,10 +959,16 @@ def import_vendors_from_transactions(account_id: int = Query(...), db: Session =
 
 @app.get("/properties", response_model=List[PropertyResponse])
 def list_properties(account_id: int = Query(...), db: Session = Depends(get_db)):
-    props = db.query(Property).filter(Property.account_id == account_id).order_by(Property.project_name).all()
+    props = (
+        db.query(Property)
+        .options(joinedload(Property.tenants))
+        .filter(Property.account_id == account_id)
+        .order_by(Property.project_name)
+        .all()
+    )
     result = []
     for prop in props:
-        tenants = db.query(Tenant).filter(Tenant.property_id == prop.id).order_by(Tenant.name).all()
+        tenants_sorted = sorted(prop.tenants, key=lambda t: t.name)
         result.append(PropertyResponse(
             id=prop.id,
             account_id=prop.account_id,
@@ -967,7 +985,7 @@ def list_properties(account_id: int = Query(...), db: Session = Depends(get_db))
                 lease_end=t.lease_end,
                 monthly_rent=float(t.monthly_rent) if t.monthly_rent is not None else None,
                 notes=t.notes,
-            ) for t in tenants],
+            ) for t in tenants_sorted],
         ))
     return result
 

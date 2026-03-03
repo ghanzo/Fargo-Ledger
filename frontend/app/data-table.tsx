@@ -43,7 +43,7 @@ function FilterPill({
       className={cn(
         "text-xs px-3 py-1.5 rounded-full border font-medium transition-colors whitespace-nowrap",
         value === null
-          ? "border-zinc-200 text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"
+          ? "border-border text-muted-foreground hover:border-ring hover:text-foreground"
           : value === true
           ? "bg-blue-600 text-white border-blue-600"
           : "bg-amber-500 text-white border-amber-500"
@@ -215,7 +215,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="max-w-xs h-8 text-sm"
           />
-          <div className="h-5 w-px bg-zinc-200 mx-1" />
+          <div className="h-5 w-px bg-border mx-1" />
           <FilterPill offLabel="Vendor"   onLabel="Has Vendor"   offOnLabel="No Vendor"       value={filterVendor}        onChange={setFilterVendor} />
           <FilterPill offLabel="Category" onLabel="Has Category" offOnLabel="No Category"     value={filterCategory}      onChange={setFilterCategory} />
           <FilterPill offLabel="Project"  onLabel="Has Project"  offOnLabel="No Project"      value={filterProject}       onChange={setFilterProject} />
@@ -223,10 +223,10 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
           <FilterPill offLabel="Status"   onLabel="Categorized" offOnLabel="Uncategorized"    value={filterCategorized}   onChange={setFilterCategorized} />
           {activeFilterCount > 0 && (
             <>
-              <div className="h-5 w-px bg-zinc-200 mx-1" />
+              <div className="h-5 w-px bg-border mx-1" />
               <button
                 onClick={clearFilters}
-                className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="h-3 w-3" /> Clear all
               </button>
@@ -234,11 +234,11 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-zinc-400">Date range:</span>
+          <span className="text-xs text-muted-foreground">Date range:</span>
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px] text-xs h-7" />
-          <span className="text-zinc-300 text-xs">→</span>
+          <span className="text-muted-foreground text-xs">→</span>
           <Input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   className="w-[140px] text-xs h-7" />
-          <span className="text-xs text-zinc-400 ml-1">
+          <span className="text-xs text-muted-foreground ml-1">
             {table.getRowModel().rows.length.toLocaleString()} of {(data as any[]).length.toLocaleString()} transactions
           </span>
           <div className="ml-auto">
@@ -252,7 +252,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
       {/* ── TABLE ───────────────────────────────────────────────────── */}
       <div className="rounded-md border overflow-auto" style={{ maxHeight: "calc(100vh - 300px)" }}>
         <Table>
-          <TableHeader className="sticky top-0 bg-white z-10 shadow-[0_1px_0_0_#e4e4e7]">
+          <TableHeader className="sticky top-0 bg-background z-10 shadow-[0_1px_0_0_var(--border)]">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -307,7 +307,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-zinc-500">
+                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
                   No transactions found.
                 </TableCell>
               </TableRow>
@@ -317,7 +317,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
       </div>
 
       {/* ── STATUS ──────────────────────────────────────────────────── */}
-      <div className="py-2 text-xs text-zinc-400">
+      <div className="py-2 text-xs text-muted-foreground">
         {selectedIds.length > 0
           ? `${selectedIds.length} selected — shift+click to extend · Esc to clear`
           : "j/k or ↑↓ to navigate · Space to select · e to edit · Ctrl+A select all · shift+click range"}
@@ -328,11 +328,11 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-4 z-50 animate-in slide-in-from-bottom-5 fade-in">
           <span className="text-sm font-medium">{selectedIds.length} selected</span>
           <div className="h-4 w-px bg-zinc-700" />
-          <Button size="sm" variant="secondary" className="h-8 text-xs hover:bg-zinc-200" onClick={() => setIsBulkOpen(true)}>
+          <Button size="sm" variant="secondary" className="h-8 text-xs hover:bg-muted" onClick={() => setIsBulkOpen(true)}>
             Categorize / Edit
           </Button>
           <Button
-            size="sm" variant="ghost" className="h-8 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800"
+            size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground hover:text-white hover:bg-zinc-800"
             onClick={() => { table.toggleAllRowsSelected(false); lastSelectedIndex.current = null; }}
           >
             Clear

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -15,7 +15,6 @@ import {
   CheckCheck,
 } from "lucide-react";
 
-const API = "http://localhost:8001";
 
 interface Suggestion {
   id: number;
@@ -50,7 +49,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
 
   const fetchSuggestions = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/suggestions?account_id=${accountId}`);
+      const res = await api.get(`/suggestions?account_id=${accountId}`);
       setSuggestions(res.data);
     } catch {
       // silent — banner just won't show
@@ -64,7 +63,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
   const handleApprove = async (s: Suggestion) => {
     setLoading(s.id);
     try {
-      await axios.post(`${API}/suggestions/${s.id}/approve`);
+      await api.post(`/suggestions/${s.id}/approve`);
       toast.success(`Applied "${s.suggested_vendor}" to ${s.transaction_count} transactions`);
       await fetchSuggestions();
       onApplied();
@@ -82,7 +81,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
       if (editValues.vendor) body.vendor = editValues.vendor;
       if (editValues.category) body.category = editValues.category;
       if (editValues.project) body.project = editValues.project;
-      await axios.post(`${API}/suggestions/${s.id}/approve`, body);
+      await api.post(`/suggestions/${s.id}/approve`, body);
       toast.success(`Applied edited values to ${s.transaction_count} transactions`);
       setEditingId(null);
       await fetchSuggestions();
@@ -97,7 +96,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
   const handleDismiss = async (s: Suggestion) => {
     setLoading(s.id);
     try {
-      await axios.post(`${API}/suggestions/${s.id}/dismiss`);
+      await api.post(`/suggestions/${s.id}/dismiss`);
       await fetchSuggestions();
     } catch {
       toast.error("Failed to dismiss suggestion");
@@ -108,7 +107,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
 
   const handleApproveAll = async () => {
     try {
-      const res = await axios.post(`${API}/suggestions/approve-all?account_id=${accountId}`);
+      const res = await api.post(`/suggestions/approve-all?account_id=${accountId}`);
       toast.success(res.data.message);
       await fetchSuggestions();
       onApplied();

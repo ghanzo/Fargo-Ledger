@@ -12,4 +12,6 @@ export interface Transaction {
   is_transfer: boolean;
   source_file: string;
   is_cleaned: boolean;
+  created_at: string | null;
+  updated_at: string | null;
 }

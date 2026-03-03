@@ -1,6 +1,6 @@
 import hashlib
 from sqlalchemy import Column, String, Date, Numeric, Boolean, JSON, Integer, ForeignKey, UniqueConstraint, DateTime, func
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
@@ -9,6 +9,11 @@ class Account(Base):
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
+
+    transactions = relationship("Transaction", back_populates="account", cascade="all, delete-orphan")
+    budgets      = relationship("Budget",      back_populates="account", cascade="all, delete-orphan")
+    vendor_infos = relationship("VendorInfo",   back_populates="account", cascade="all, delete-orphan")
+    properties   = relationship("Property",     back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name={self.name})>"
@@ -21,6 +26,7 @@ class Transaction(Base):
 
     # Account
     account_id = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    account = relationship("Account", back_populates="transactions")
 
     # Core Bank Data
     transaction_date = Column(Date, nullable=False)
@@ -44,6 +50,10 @@ class Transaction(Base):
     # Status Flags
     is_cleaned = Column(Boolean, default=False)  # True if categorized/processed
 
+    # Audit Timestamps
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
     def __repr__(self):
         return f"<Transaction(date={self.transaction_date}, desc={self.description}, amount={self.amount})>"
 
@@ -54,6 +64,8 @@ class Budget(Base):
     account_id     = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
     category       = Column(String, nullable=False)
     monthly_limit  = Column(Numeric(10, 2), nullable=False)
+
+    account = relationship("Account", back_populates="budgets")
 
     __table_args__ = (
         UniqueConstraint('account_id', 'category', name='budgets_account_category_unique'),
@@ -72,6 +84,10 @@ class VendorInfo(Base):
     rating         = Column(Integer)  # 1–5
     notes          = Column(String)
     rules          = Column(JSON)     # auto-assign rules: patterns, default_category/project, confidence, etc.
+
+    account     = relationship("Account", back_populates="vendor_infos")
+    suggestions = relationship("ImportSuggestion", back_populates="vendor_info", cascade="all, delete-orphan")
+
     __table_args__ = (UniqueConstraint('account_id', 'vendor_name', name='vendor_info_account_name_uq'),)
 
 class Property(Base):
@@ -81,12 +97,17 @@ class Property(Base):
     project_name = Column(String, nullable=False)
     address      = Column(String)
     notes        = Column(String)
+
+    account = relationship("Account", back_populates="properties")
+    tenants = relationship("Tenant", back_populates="property", cascade="all, delete-orphan")
+
     __table_args__ = (UniqueConstraint('account_id', 'project_name', name='properties_account_proj_uq'),)
 
 class Tenant(Base):
     __tablename__ = 'tenants'
     id           = Column(Integer, primary_key=True, autoincrement=True)
     property_id  = Column(Integer, ForeignKey('properties.id', ondelete='CASCADE'), nullable=False)
+    property     = relationship("Property", back_populates="tenants")
     name         = Column(String, nullable=False)
     phone        = Column(String)
     email        = Column(String)
@@ -101,6 +122,7 @@ class ImportSuggestion(Base):
     id                 = Column(Integer, primary_key=True, autoincrement=True)
     account_id         = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'))
     vendor_info_id     = Column(Integer, ForeignKey('vendor_info.id', ondelete='CASCADE'), nullable=True)
+    vendor_info        = relationship("VendorInfo", back_populates="suggestions")
     suggested_vendor   = Column(String, nullable=True)
     suggested_category = Column(String, nullable=True)
     suggested_project  = Column(String, nullable=True)

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { useAccount } from "@/context/account-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Trash2, Plus, Download, RefreshCw, ChevronRight, ChevronDown, X, Search, Phone, Mail } from "lucide-react";
 
-const API = "http://localhost:8001";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -390,7 +389,7 @@ function VendorsTab() {
 
   const fetchVendors = useCallback(async () => {
     if (!activeAccount) return;
-    const res = await axios.get(`${API}/vendor-info?account_id=${activeAccount.id}`);
+    const res = await api.get(`/vendor-info?account_id=${activeAccount.id}`);
     setVendors(res.data);
   }, [activeAccount]);
 
@@ -400,7 +399,7 @@ function VendorsTab() {
     if (!activeAccount) return;
     setImporting(true);
     try {
-      const res = await axios.post(`${API}/vendor-info/import-from-transactions?account_id=${activeAccount.id}`);
+      const res = await api.post(`/vendor-info/import-from-transactions?account_id=${activeAccount.id}`);
       await fetchVendors();
       alert(`Imported ${res.data.created} vendors (${res.data.already_existed} already existed)`);
     } finally {
@@ -412,7 +411,7 @@ function VendorsTab() {
     if (!activeAccount) return;
     setLearning(true);
     try {
-      const res = await axios.post(`${API}/vendor-info/rebuild-rules?account_id=${activeAccount.id}`);
+      const res = await api.post(`/vendor-info/rebuild-rules?account_id=${activeAccount.id}`);
       await fetchVendors();
       alert(`Learned from history: ${res.data.updated} vendors updated, ${res.data.ambiguous_patterns_resolved} ambiguous patterns resolved.`);
     } finally {
@@ -421,7 +420,7 @@ function VendorsTab() {
   };
 
   const updateVendor = async (id: number, field: string, value: string | number | null) => {
-    await axios.put(`${API}/vendor-info/${id}`, { [field]: value || null });
+    await api.put(`/vendor-info/${id}`, { [field]: value || null });
     await fetchVendors();
   };
 
@@ -431,14 +430,14 @@ function VendorsTab() {
       enabled: false, assigned_count: 0, corrected_count: 0, confidence: 1,
     };
     const newRules = { ...existing, ...patch };
-    await axios.put(`${API}/vendor-info/${vendor.id}`, { rules: newRules });
+    await api.put(`/vendor-info/${vendor.id}`, { rules: newRules });
     await fetchVendors();
   };
 
   const addVendor = async () => {
     if (!activeAccount || !newName.trim()) return;
     try {
-      await axios.post(`${API}/vendor-info?account_id=${activeAccount.id}`, { vendor_name: newName.trim() });
+      await api.post(`/vendor-info?account_id=${activeAccount.id}`, { vendor_name: newName.trim() });
       setNewName(""); setAddingNew(false);
       await fetchVendors();
     } catch (e: any) {
@@ -448,7 +447,7 @@ function VendorsTab() {
 
   const deleteVendor = async (id: number, name: string) => {
     if (!window.confirm(`Delete vendor "${name}"?`)) return;
-    await axios.delete(`${API}/vendor-info/${id}`);
+    await api.delete(`/vendor-info/${id}`);
     await fetchVendors();
   };
 
@@ -591,7 +590,7 @@ function PropertiesTab() {
 
   const fetchProperties = useCallback(async () => {
     if (!activeAccount) return;
-    const res = await axios.get(`${API}/properties?account_id=${activeAccount.id}`);
+    const res = await api.get(`/properties?account_id=${activeAccount.id}`);
     setProperties(res.data);
   }, [activeAccount]);
 
@@ -600,7 +599,7 @@ function PropertiesTab() {
   const createProperty = async () => {
     if (!activeAccount || !newProp.project_name.trim()) return;
     try {
-      await axios.post(`${API}/properties?account_id=${activeAccount.id}`, {
+      await api.post(`/properties?account_id=${activeAccount.id}`, {
         project_name: newProp.project_name.trim(),
         address: newProp.address || null,
         notes: newProp.notes || null,
@@ -614,13 +613,13 @@ function PropertiesTab() {
   };
 
   const updateProperty = async (pid: number, field: string, value: string) => {
-    await axios.put(`${API}/properties/${pid}`, { [field]: value || null });
+    await api.put(`/properties/${pid}`, { [field]: value || null });
     await fetchProperties();
   };
 
   const deleteProperty = async (pid: number, name: string) => {
     if (!window.confirm(`Delete property "${name}" and all its tenants?`)) return;
-    await axios.delete(`${API}/properties/${pid}`);
+    await api.delete(`/properties/${pid}`);
     await fetchProperties();
   };
 
@@ -638,7 +637,7 @@ function PropertiesTab() {
   const createTenant = async (pid: number) => {
     const draft = addingTenant.get(pid);
     if (!draft?.name?.trim()) return;
-    await axios.post(`${API}/properties/${pid}/tenants`, {
+    await api.post(`/properties/${pid}/tenants`, {
       name: draft.name, phone: draft.phone || null, email: draft.email || null,
       lease_start: draft.lease_start || null, lease_end: draft.lease_end || null,
       monthly_rent: draft.monthly_rent ?? null, notes: draft.notes || null,
@@ -648,13 +647,13 @@ function PropertiesTab() {
   };
 
   const updateTenant = async (tid: number, field: string, value: string | number | null) => {
-    await axios.put(`${API}/tenants/${tid}`, { [field]: value || null });
+    await api.put(`/tenants/${tid}`, { [field]: value || null });
     await fetchProperties();
   };
 
   const deleteTenant = async (tid: number, name: string) => {
     if (!window.confirm(`Delete tenant "${name}"?`)) return;
-    await axios.delete(`${API}/tenants/${tid}`);
+    await api.delete(`/tenants/${tid}`);
     await fetchProperties();
   };
 

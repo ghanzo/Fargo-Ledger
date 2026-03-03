@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { usePersistentState } from "@/hooks/use-persistent-state";
-import axios from "axios";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Settings2, ChevronLeft, ChevronRight } from "lucide-react";
@@ -57,7 +57,6 @@ interface ProjectData {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const API = "http://localhost:8001";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -74,12 +73,12 @@ function StatCard({
 }: {
   label: string; value: string; sub?: string; accent?: "emerald" | "red" | "blue" | "zinc";
 }) {
-  const colors = { emerald: "text-emerald-600", red: "text-red-500", blue: "text-blue-600", zinc: "text-zinc-700" };
+  const colors = { emerald: "text-emerald-600", red: "text-red-500", blue: "text-blue-600", zinc: "text-foreground" };
   return (
-    <div className="bg-white rounded-xl border shadow-sm p-5">
-      <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">{label}</p>
+    <div className="bg-background rounded-xl border shadow-sm p-5">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={`text-2xl font-bold mt-1 ${colors[accent ?? "zinc"]}`}>{value}</p>
-      {sub && <p className="text-xs text-zinc-400 mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
     </div>
   );
 }
@@ -123,8 +122,8 @@ function PeriodSelector({
             onClick={() => setPeriodMode(mode)}
             className={`px-3 py-1.5 transition-colors ${
               periodMode === mode
-                ? "bg-zinc-900 text-white"
-                : "text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50"
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
           >
             {mode === "month" ? "Month" : mode === "year" ? "Year" : "Custom"}
@@ -137,18 +136,18 @@ function PeriodSelector({
         <div className="flex items-center gap-1">
           <button
             onClick={prevMonth}
-            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted transition-colors"
           >
-            <ChevronLeft className="h-4 w-4 text-zinc-500" />
+            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
           </button>
-          <span className="text-sm font-medium text-zinc-700 min-w-[130px] text-center">
+          <span className="text-sm font-medium text-foreground min-w-[130px] text-center">
             {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
           </span>
           <button
             onClick={nextMonth}
-            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted transition-colors"
           >
-            <ChevronRight className="h-4 w-4 text-zinc-500" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
       )}
@@ -157,18 +156,18 @@ function PeriodSelector({
         <div className="flex items-center gap-1">
           <button
             onClick={() => setSelectedYear(selectedYear - 1)}
-            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted transition-colors"
           >
-            <ChevronLeft className="h-4 w-4 text-zinc-500" />
+            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
           </button>
-          <span className="text-sm font-medium text-zinc-700 min-w-[60px] text-center">
+          <span className="text-sm font-medium text-foreground min-w-[60px] text-center">
             {selectedYear}
           </span>
           <button
             onClick={() => setSelectedYear(selectedYear + 1)}
-            className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded hover:bg-muted transition-colors"
           >
-            <ChevronRight className="h-4 w-4 text-zinc-500" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
       )}
@@ -176,7 +175,7 @@ function PeriodSelector({
       {periodMode === "custom" && (
         <div className="flex items-center gap-2">
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px] text-xs h-8" />
-          <span className="text-zinc-300 text-xs">→</span>
+          <span className="text-muted-foreground text-xs">→</span>
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px] text-xs h-8" />
           <Button size="sm" onClick={onApplyCustom} className="h-8 text-xs">Apply</Button>
         </div>
@@ -194,7 +193,7 @@ function Breadcrumb({
     <nav className="flex items-center gap-1 text-sm flex-wrap">
       {items.map((item, i) => (
         <span key={i} className="flex items-center gap-1">
-          {i > 0 && <ChevronRight className="h-3 w-3 text-zinc-300" />}
+          {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
           {i < items.length - 1 ? (
             <button
               onClick={item.onClick}
@@ -203,7 +202,7 @@ function Breadcrumb({
               {item.label}
             </button>
           ) : (
-            <span className="text-zinc-700 font-medium">{item.label}</span>
+            <span className="text-foreground font-medium">{item.label}</span>
           )}
         </span>
       ))}
@@ -223,16 +222,16 @@ function CategoryTable({
   onSelect: (cat: string) => void;
 }) {
   if (categories.length === 0) {
-    return <div className="text-sm text-zinc-400 py-8 text-center">No categorized transactions for this period.</div>;
+    return <div className="text-sm text-muted-foreground py-8 text-center">No categorized transactions for this period.</div>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-zinc-400">Category</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Amount</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">% of Total</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Category</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Amount</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">% of Total</th>
             <th className="pb-2 w-6"></th>
           </tr>
         </thead>
@@ -247,15 +246,15 @@ function CategoryTable({
               <tr
                 key={c.category}
                 onClick={() => onSelect(c.category)}
-                className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors group"
+                className="border-b last:border-0 hover:bg-muted cursor-pointer transition-colors group"
               >
-                <td className={`py-2.5 font-medium ${c.category === "(Uncategorized)" ? "text-zinc-400 italic" : "text-zinc-800"}`}>{c.category}</td>
-                <td className={`py-2.5 text-right font-medium ${isExpense ? "text-zinc-700" : "text-emerald-600"}`}>
+                <td className={`py-2.5 font-medium ${c.category === "(Uncategorized)" ? "text-muted-foreground italic" : "text-foreground"}`}>{c.category}</td>
+                <td className={`py-2.5 text-right font-medium ${isExpense ? "text-foreground" : "text-emerald-600"}`}>
                   {isExpense ? `−${fmt(abs)}` : `+${fmt(abs)}`}
                 </td>
-                <td className="py-2.5 text-right text-zinc-400">{pct}%</td>
+                <td className="py-2.5 text-right text-muted-foreground">{pct}%</td>
                 <td className="py-2.5 text-right">
-                  <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 transition-colors ml-auto" />
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-muted-foreground transition-colors ml-auto" />
                 </td>
               </tr>
             );
@@ -280,17 +279,17 @@ function VendorTable({
   onSelect: (v: string) => void;
 }) {
   if (vendors.length === 0) {
-    return <div className="text-sm text-zinc-400 py-8 text-center">No vendor data for this period.</div>;
+    return <div className="text-sm text-muted-foreground py-8 text-center">No vendor data for this period.</div>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-zinc-400">Vendor</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Amount</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right"># Txns</th>
-            {showPct && <th className="pb-2 text-xs font-medium text-zinc-400 text-right">{pctLabel ?? "% of Total"}</th>}
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Vendor</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Amount</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right"># Txns</th>
+            {showPct && <th className="pb-2 text-xs font-medium text-muted-foreground text-right">{pctLabel ?? "% of Total"}</th>}
             <th className="pb-2 w-6"></th>
           </tr>
         </thead>
@@ -304,16 +303,16 @@ function VendorTable({
               <tr
                 key={v.vendor}
                 onClick={() => onSelect(v.vendor)}
-                className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors group"
+                className="border-b last:border-0 hover:bg-muted cursor-pointer transition-colors group"
               >
-                <td className={`py-2.5 font-medium ${v.vendor === "(No Vendor)" ? "text-zinc-400 italic" : "text-zinc-800"}`}>{v.vendor}</td>
-                <td className={`py-2.5 text-right font-medium ${v.total >= 0 ? "text-emerald-600" : "text-zinc-700"}`}>
+                <td className={`py-2.5 font-medium ${v.vendor === "(No Vendor)" ? "text-muted-foreground italic" : "text-foreground"}`}>{v.vendor}</td>
+                <td className={`py-2.5 text-right font-medium ${v.total >= 0 ? "text-emerald-600" : "text-foreground"}`}>
                   {v.total >= 0 ? `+${fmt(v.total)}` : `−${fmt(Math.abs(v.total))}`}
                 </td>
-                <td className="py-2.5 text-right text-zinc-500">{v.count}</td>
-                {showPct && <td className="py-2.5 text-right text-zinc-400">{pct}%</td>}
+                <td className="py-2.5 text-right text-muted-foreground">{v.count}</td>
+                {showPct && <td className="py-2.5 text-right text-muted-foreground">{pct}%</td>}
                 <td className="py-2.5 text-right">
-                  <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 transition-colors ml-auto" />
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-muted-foreground transition-colors ml-auto" />
                 </td>
               </tr>
             );
@@ -336,19 +335,19 @@ function TransactionTable({
   onSelect: (tx: Transaction) => void;
 }) {
   if (transactions.length === 0) {
-    return <div className="text-sm text-zinc-400 py-8 text-center">No transactions found.</div>;
+    return <div className="text-sm text-muted-foreground py-8 text-center">No transactions found.</div>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-zinc-400">Date</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Amount</th>
-            {showCategory && <th className="pb-2 text-xs font-medium text-zinc-400">Category</th>}
-            {showVendor && <th className="pb-2 text-xs font-medium text-zinc-400">Vendor</th>}
-            <th className="pb-2 text-xs font-medium text-zinc-400">Notes</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400">Tags</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Date</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Amount</th>
+            {showCategory && <th className="pb-2 text-xs font-medium text-muted-foreground">Category</th>}
+            {showVendor && <th className="pb-2 text-xs font-medium text-muted-foreground">Vendor</th>}
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Notes</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Tags</th>
           </tr>
         </thead>
         <tbody>
@@ -358,39 +357,39 @@ function TransactionTable({
               <tr
                 key={tx.id}
                 onClick={() => onSelect(tx)}
-                className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors"
+                className="border-b last:border-0 hover:bg-muted cursor-pointer transition-colors"
               >
-                <td className="py-2.5 text-zinc-500 whitespace-nowrap">{tx.transaction_date}</td>
-                <td className={`py-2.5 text-right font-medium whitespace-nowrap ${amount > 0 ? "text-emerald-600" : "text-zinc-800"}`}>
+                <td className="py-2.5 text-muted-foreground whitespace-nowrap">{tx.transaction_date}</td>
+                <td className={`py-2.5 text-right font-medium whitespace-nowrap ${amount > 0 ? "text-emerald-600" : "text-foreground"}`}>
                   {amount > 0 ? "+" : ""}{fmt(Math.abs(amount))}
                 </td>
                 {showCategory && (
-                  <td className="py-2.5 text-zinc-500 max-w-[120px] truncate">
-                    {tx.category ?? <span className="text-zinc-300 italic">—</span>}
+                  <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
+                    {tx.category ?? <span className="text-muted-foreground italic">—</span>}
                   </td>
                 )}
                 {showVendor && (
-                  <td className="py-2.5 text-zinc-500 max-w-[120px] truncate">
-                    {tx.vendor ?? <span className="text-zinc-300 italic">—</span>}
+                  <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
+                    {tx.vendor ?? <span className="text-muted-foreground italic">—</span>}
                   </td>
                 )}
-                <td className="py-2.5 text-zinc-500 max-w-[200px] truncate">
-                  {tx.notes ?? <span className="text-zinc-300 italic">—</span>}
+                <td className="py-2.5 text-muted-foreground max-w-[200px] truncate">
+                  {tx.notes ?? <span className="text-muted-foreground italic">—</span>}
                 </td>
                 <td className="py-2.5 max-w-[150px]">
                   {tx.tags && tx.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {tx.tags.slice(0, 3).map((t) => (
-                        <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-zinc-100 text-zinc-600">
+                        <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">
                           {t}
                         </span>
                       ))}
                       {tx.tags.length > 3 && (
-                        <span className="text-xs text-zinc-400">+{tx.tags.length - 3}</span>
+                        <span className="text-xs text-muted-foreground">+{tx.tags.length - 3}</span>
                       )}
                     </div>
                   ) : (
-                    <span className="text-zinc-300 italic">—</span>
+                    <span className="text-muted-foreground italic">—</span>
                   )}
                 </td>
               </tr>
@@ -404,7 +403,7 @@ function TransactionTable({
 
 function MonthlyTrendsTable({ monthly }: { monthly: MonthlyData[] }) {
   if (monthly.length === 0) {
-    return <div className="text-sm text-zinc-400 py-8 text-center">No data available.</div>;
+    return <div className="text-sm text-muted-foreground py-8 text-center">No data available.</div>;
   }
   const sorted = [...monthly].sort((a, b) => b.month.localeCompare(a.month));
   return (
@@ -412,20 +411,20 @@ function MonthlyTrendsTable({ monthly }: { monthly: MonthlyData[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-zinc-400">Month</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Income</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Expenses</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Net</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Month</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Income</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Expenses</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Net</th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((m) => {
             const net = m.income - m.expenses;
             return (
-              <tr key={m.month} className="border-b last:border-0 hover:bg-zinc-50 transition-colors">
-                <td className="py-2.5 font-medium text-zinc-700">{m.month}</td>
+              <tr key={m.month} className="border-b last:border-0 hover:bg-muted transition-colors">
+                <td className="py-2.5 font-medium text-foreground">{m.month}</td>
                 <td className="py-2.5 text-right text-emerald-600 font-medium">{fmt(m.income)}</td>
-                <td className="py-2.5 text-right text-zinc-700">{fmt(m.expenses)}</td>
+                <td className="py-2.5 text-right text-foreground">{fmt(m.expenses)}</td>
                 <td className={`py-2.5 text-right font-semibold ${net >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                   {net >= 0 ? "+" : ""}{fmt(net)}
                 </td>
@@ -446,7 +445,7 @@ function ProjectTable({
   onSelect: (p: string | null) => void;
 }) {
   if (projects.length === 0) {
-    return <div className="text-sm text-zinc-400 py-8 text-center">No project data for this period.</div>;
+    return <div className="text-sm text-muted-foreground py-8 text-center">No project data for this period.</div>;
   }
   const sorted = [...projects].sort((a, b) => {
     if (a.project === null) return 1;
@@ -458,11 +457,11 @@ function ProjectTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-zinc-400">Project</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Income</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Expenses</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right">Net</th>
-            <th className="pb-2 text-xs font-medium text-zinc-400 text-right"># Txns</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground">Project</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Income</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Expenses</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Net</th>
+            <th className="pb-2 text-xs font-medium text-muted-foreground text-right"># Txns</th>
             <th className="pb-2 w-6"></th>
           </tr>
         </thead>
@@ -474,23 +473,23 @@ function ProjectTable({
               <tr
                 key={label}
                 onClick={() => onSelect(p.project)}
-                className="border-b last:border-0 hover:bg-zinc-50 cursor-pointer transition-colors group"
+                className="border-b last:border-0 hover:bg-muted cursor-pointer transition-colors group"
               >
-                <td className={`py-2.5 font-medium ${p.project === null ? "text-zinc-400 italic" : "text-zinc-800"}`}>
+                <td className={`py-2.5 font-medium ${p.project === null ? "text-muted-foreground italic" : "text-foreground"}`}>
                   {label}
                 </td>
                 <td className="py-2.5 text-right text-emerald-600 font-medium">
-                  {p.income > 0 ? `+${fmt(p.income)}` : <span className="text-zinc-300">—</span>}
+                  {p.income > 0 ? `+${fmt(p.income)}` : <span className="text-muted-foreground">—</span>}
                 </td>
-                <td className="py-2.5 text-right text-zinc-700">
-                  {p.expenses > 0 ? `−${fmt(p.expenses)}` : <span className="text-zinc-300">—</span>}
+                <td className="py-2.5 text-right text-foreground">
+                  {p.expenses > 0 ? `−${fmt(p.expenses)}` : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className={`py-2.5 text-right font-semibold ${net >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                   {net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}
                 </td>
-                <td className="py-2.5 text-right text-zinc-500">{p.count}</td>
+                <td className="py-2.5 text-right text-muted-foreground">{p.count}</td>
                 <td className="py-2.5 text-right">
-                  <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 transition-colors ml-auto" />
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-muted-foreground transition-colors ml-auto" />
                 </td>
               </tr>
             );
@@ -571,10 +570,10 @@ export default function AnalysisPage() {
     try {
       const qs = buildQs();
       const [sumRes, catRes, budRes, uncatRes] = await Promise.all([
-        axios.get(`${API}/stats/summary${qs}`),
-        axios.get(`${API}/stats/category_breakdown${qs}`),
-        axios.get(`${API}/stats/budget_status${buildQs()}`),
-        axios.get(`${API}/transactions${buildQs({ has_category: "false" })}`),
+        api.get(`/stats/summary${qs}`),
+        api.get(`/stats/category_breakdown${qs}`),
+        api.get(`/stats/budget_status${buildQs()}`),
+        api.get(`/transactions${buildQs({ has_category: "false" })}`),
       ]);
       setSummary(sumRes.data);
       const uncategorized: Transaction[] = uncatRes.data;
@@ -606,7 +605,7 @@ export default function AnalysisPage() {
   const fetchMonthly = useCallback(async () => {
     if (!activeAccount) return;
     try {
-      const res = await axios.get(`${API}/stats/monthly?account_id=${activeAccount.id}`);
+      const res = await api.get(`/stats/monthly?account_id=${activeAccount.id}`);
       setMonthly(res.data);
     } catch {
       // silent
@@ -618,7 +617,7 @@ export default function AnalysisPage() {
     setLoadingDrill(true);
     try {
       const qs = buildQs({ limit: "200" });
-      const res = await axios.get(`${API}/stats/top_vendors${qs}`);
+      const res = await api.get(`/stats/top_vendors${qs}`);
       setAllVendors(res.data);
     } catch {
       // silent
@@ -632,8 +631,8 @@ export default function AnalysisPage() {
     setLoadingDrill(true);
     try {
       const [vendorRes, unassignedRes] = await Promise.all([
-        axios.get(`${API}/stats/top_vendors${buildQs({ category, limit: "200" })}`),
-        axios.get(`${API}/transactions${buildQs({ category, has_vendor: "false" })}`),
+        api.get(`/stats/top_vendors${buildQs({ category, limit: "200" })}`),
+        api.get(`/transactions${buildQs({ category, has_vendor: "false" })}`),
       ]);
       const vendors: VendorData[] = vendorRes.data;
       const unassigned: Transaction[] = unassignedRes.data;
@@ -660,7 +659,7 @@ export default function AnalysisPage() {
       const extra: Record<string, string> = { vendor };
       if (category) extra.category = category;
       const qs = buildQs(extra);
-      const res = await axios.get(`${API}/transactions${qs}`);
+      const res = await api.get(`/transactions${qs}`);
       setTransactions(res.data);
     } catch {
       // silent
@@ -673,7 +672,7 @@ export default function AnalysisPage() {
   const fetchProjectBreakdown = useCallback(async () => {
     setLoadingDrill(true);
     try {
-      const res = await axios.get(`${API}/stats/project_breakdown${buildQs()}`);
+      const res = await api.get(`/stats/project_breakdown${buildQs()}`);
       setProjects(res.data);
     } catch {
       // silent
@@ -687,7 +686,7 @@ export default function AnalysisPage() {
     setLoadingDrill(true);
     try {
       const projectParam = project === null ? "__none__" : project;
-      const res = await axios.get(`${API}/stats/category_breakdown${buildQs({ project: projectParam })}`);
+      const res = await api.get(`/stats/category_breakdown${buildQs({ project: projectParam })}`);
       const sortCats = (list: CategoryData[]) =>
         list.sort((a, b) => {
           const aPos = a.total >= 0, bPos = b.total >= 0;
@@ -710,7 +709,7 @@ export default function AnalysisPage() {
       const extra: Record<string, string> = { category };
       if (project === null) extra.has_project = "false";
       else extra.project = project;
-      const res = await axios.get(`${API}/transactions${buildQs(extra)}`);
+      const res = await api.get(`/transactions${buildQs(extra)}`);
       setTransactions(res.data);
     } catch {
       // silent
@@ -854,13 +853,13 @@ export default function AnalysisPage() {
   const net = summary?.net ?? 0;
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6 md:p-8">
+    <div className="min-h-screen bg-muted p-6 md:p-8">
       {/* HEADER */}
       <header className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Analysis</h1>
           {summary && (
-            <p className="text-sm text-zinc-500 mt-0.5">
+            <p className="text-sm text-muted-foreground mt-0.5">
               {summary.transaction_count.toLocaleString()} transactions
               {summary.uncategorized_count > 0 && (
                 <span className="ml-2 text-amber-500">· {summary.uncategorized_count} uncategorized</span>
@@ -885,7 +884,7 @@ export default function AnalysisPage() {
 
       {/* SUMMARY CARDS */}
       {loadingSummary ? (
-        <div className="h-24 flex items-center justify-center text-zinc-400 text-sm">Loading...</div>
+        <div className="h-24 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <StatCard label="Total Income"    value={fmt(summary?.total_income ?? 0)}          accent="emerald" />
@@ -896,7 +895,7 @@ export default function AnalysisPage() {
       )}
 
       {/* TABS */}
-      <div className="bg-white rounded-xl border shadow-sm mb-6">
+      <div className="bg-background rounded-xl border shadow-sm mb-6">
         {/* Tab bar */}
         <div className="flex border-b">
           {(["category", "vendor", "project", "trends"] as const).map((tab) => (
@@ -905,8 +904,8 @@ export default function AnalysisPage() {
               onClick={() => setActiveTab(tab)}
               className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 activeTab === tab
-                  ? "border-zinc-900 text-zinc-900"
-                  : "border-transparent text-zinc-400 hover:text-zinc-600"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-muted-foreground"
               }`}
             >
               {tab === "category" ? "By Category" : tab === "vendor" ? "By Vendor" : tab === "project" ? "By Project" : "Monthly Trends"}
@@ -937,7 +936,7 @@ export default function AnalysisPage() {
               {/* Level 1: vendor list within category */}
               {catDrill.category && !catDrill.vendor && !catDrill.directTx && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading vendors...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading vendors...</div>
                 ) : (
                   <VendorTable
                     vendors={catVendors}
@@ -952,7 +951,7 @@ export default function AnalysisPage() {
               {/* Level 2: transaction list */}
               {(catDrill.vendor || catDrill.directTx) && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading transactions...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading transactions...</div>
                 ) : (
                   <TransactionTable
                     transactions={transactions}
@@ -975,7 +974,7 @@ export default function AnalysisPage() {
               {/* Level 0: all vendors */}
               {!venDrill.vendor && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading vendors...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading vendors...</div>
                 ) : (
                   <VendorTable
                     vendors={allVendors}
@@ -988,7 +987,7 @@ export default function AnalysisPage() {
               {/* Level 1: transactions for vendor */}
               {venDrill.vendor && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading transactions...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading transactions...</div>
                 ) : (
                   <TransactionTable
                     transactions={transactions}
@@ -1010,7 +1009,7 @@ export default function AnalysisPage() {
               {/* Level 0: project list */}
               {projDrill.project === undefined && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading projects...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading projects...</div>
                 ) : (
                   <ProjectTable projects={projects} onSelect={handleSelectProject} />
                 )
@@ -1019,7 +1018,7 @@ export default function AnalysisPage() {
               {/* Level 1: categories within project */}
               {projDrill.project !== undefined && projDrill.category === undefined && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading categories...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading categories...</div>
                 ) : (
                   <CategoryTable
                     categories={projCategories}
@@ -1033,7 +1032,7 @@ export default function AnalysisPage() {
               {/* Level 2: transactions within project + category */}
               {projDrill.category !== undefined && (
                 loadingDrill ? (
-                  <div className="py-8 text-center text-zinc-400 text-sm">Loading transactions...</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">Loading transactions...</div>
                 ) : (
                   <TransactionTable
                     transactions={transactions}
@@ -1054,11 +1053,11 @@ export default function AnalysisPage() {
       </div>
 
       {/* BUDGET TRACKER */}
-      <div className="bg-white rounded-xl border shadow-sm p-6">
+      <div className="bg-background rounded-xl border shadow-sm p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-sm font-semibold text-zinc-700">Monthly Budget</h2>
-            <p className="text-xs text-zinc-400 mt-0.5">Current calendar month spend vs limits</p>
+            <h2 className="text-sm font-semibold text-foreground">Monthly Budget</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Current calendar month spend vs limits</p>
           </div>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setBudgetOpen(true)}>
             <Settings2 className="h-3 w-3" /> Manage
@@ -1066,7 +1065,7 @@ export default function AnalysisPage() {
         </div>
 
         {budgetStatuses.length === 0 ? (
-          <div className="text-sm text-zinc-400 py-6 text-center">
+          <div className="text-sm text-muted-foreground py-6 text-center">
             No budgets set — click Manage to add category limits
           </div>
         ) : (
@@ -1077,19 +1076,19 @@ export default function AnalysisPage() {
               return (
                 <div key={b.category}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-zinc-700">{b.category}</span>
-                    <span className={`text-xs font-medium ${over ? "text-red-500" : "text-zinc-500"}`}>
+                    <span className="text-sm font-medium text-foreground">{b.category}</span>
+                    <span className={`text-xs font-medium ${over ? "text-red-500" : "text-muted-foreground"}`}>
                       {fmt(b.actual_spend)} / {fmt(b.monthly_limit)}
                       {over && <span className="ml-1.5">over by {fmt(b.actual_spend - b.monthly_limit)}</span>}
                     </span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-400" : "bg-emerald-500"}`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {over
                       ? `${b.percentage.toFixed(0)}% used`
                       : `${fmt(b.remaining)} remaining · ${b.percentage.toFixed(0)}% used`}

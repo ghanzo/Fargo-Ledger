@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
     if (!newName.trim()) return;
     setLoading(true);
     try {
-      await axios.post("http://localhost:8001/accounts", { name: newName.trim() });
+      await api.post("/accounts", { name: newName.trim() });
       setNewName("");
       await refreshAccounts();
     } catch (err: any) {
@@ -48,7 +48,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
   const handleRename = async (id: number) => {
     if (!editName.trim()) return;
     try {
-      await axios.put(`http://localhost:8001/accounts/${id}`, { name: editName.trim() });
+      await api.put(`/accounts/${id}`, { name: editName.trim() });
       setEditingId(null);
       setEditName("");
       await refreshAccounts();
@@ -59,7 +59,7 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8001/accounts/${id}`);
+      await api.delete(`/accounts/${id}`);
       await refreshAccounts();
     } catch (err: any) {
       toast.error(err?.response?.data?.detail ?? "Failed to delete account");
@@ -91,14 +91,14 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
                     />
                     <button
                       onClick={() => handleRename(a.id)}
-                      className="text-zinc-400 hover:text-emerald-600 transition-colors"
+                      className="text-muted-foreground hover:text-emerald-600 transition-colors"
                       title="Save"
                     >
                       <Check className="h-4 w-4" />
                     </button>
                     <button
                       onClick={cancelEdit}
-                      className="text-zinc-400 hover:text-zinc-700 transition-colors"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
                       title="Cancel"
                     >
                       <X className="h-4 w-4" />
@@ -106,17 +106,17 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
                   </>
                 ) : (
                   <>
-                    <span className="flex-1 text-sm font-medium text-zinc-700">{a.name}</span>
+                    <span className="flex-1 text-sm font-medium text-foreground">{a.name}</span>
                     <button
                       onClick={() => startEdit(a.id, a.name)}
-                      className="text-zinc-300 hover:text-zinc-600 transition-colors"
+                      className="text-muted-foreground hover:text-muted-foreground transition-colors"
                       title="Rename account"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(a.id)}
-                      className="text-zinc-300 hover:text-red-500 transition-colors"
+                      className="text-muted-foreground hover:text-red-500 transition-colors"
                       title="Delete account"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -129,11 +129,11 @@ export function AccountManagerDialog({ open, onOpenChange }: AccountManagerDialo
         )}
 
         {accounts.length === 0 && (
-          <p className="text-sm text-zinc-400 text-center py-4">No accounts yet.</p>
+          <p className="text-sm text-muted-foreground text-center py-4">No accounts yet.</p>
         )}
 
-        <div className="border rounded-lg p-3 bg-zinc-50">
-          <p className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wide">Add Account</p>
+        <div className="border rounded-lg p-3 bg-muted">
+          <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Add Account</p>
           <div className="flex gap-2">
             <Input
               placeholder="Account name"

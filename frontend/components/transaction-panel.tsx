@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { Transaction } from "@/types/transaction";
 import { X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,8 +46,8 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
 
     // Only fetch suggestions for uncategorized transactions
     if (!transaction.is_cleaned) {
-      axios
-        .get(`http://localhost:8001/transactions/${transaction.id}/suggest`)
+      api
+        .get(`/transactions/${transaction.id}/suggest`)
         .then((res) => {
           if (res.data.vendor || res.data.category) setSuggestion(res.data);
         })
@@ -73,7 +73,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     if (!transaction) return;
     setLoading(true);
     try {
-      await axios.put(`http://localhost:8001/transactions/${transaction.id}`, {
+      await api.put(`/transactions/${transaction.id}`, {
         vendor:        vendor   || null,
         category:      category || null,
         project:       project  || null,
@@ -112,17 +112,17 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
 
       {/* Panel */}
       <div
-        className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col
+        className={`fixed top-0 right-0 h-full w-[420px] bg-background shadow-2xl z-50 flex flex-col
           transition-transform duration-200 ease-out ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-          <h2 className="font-semibold text-zinc-900 text-sm">Transaction Detail</h2>
+          <h2 className="font-semibold text-foreground text-sm">Transaction Detail</h2>
           <button
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-700 transition-colors"
+            className="text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
@@ -132,34 +132,34 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
           {/* Read-only info block */}
-          <div className="rounded-lg bg-zinc-50 border p-3 space-y-2 text-sm">
+          <div className="rounded-lg bg-muted border p-3 space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-zinc-400">Date</span>
+              <span className="text-muted-foreground">Date</span>
               <span className="font-medium">{transaction.transaction_date}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-zinc-400">Amount</span>
+              <span className="text-muted-foreground">Amount</span>
               <span className={`font-semibold ${amount > 0 ? "text-emerald-600" : ""}`}>
                 {amount > 0 ? "+" : ""}{fmtAmount}
               </span>
             </div>
             <div>
-              <span className="text-zinc-400 text-xs block mb-1">Description</span>
-              <span className="text-xs font-mono text-zinc-600 leading-relaxed">
+              <span className="text-muted-foreground text-xs block mb-1">Description</span>
+              <span className="text-xs font-mono text-muted-foreground leading-relaxed">
                 {transaction.description}
               </span>
             </div>
             {transaction.source_file && (
               <div className="flex justify-between">
-                <span className="text-zinc-400">Source</span>
-                <span className="text-xs text-zinc-500">{transaction.source_file}</span>
+                <span className="text-muted-foreground">Source</span>
+                <span className="text-xs text-muted-foreground">{transaction.source_file}</span>
               </div>
             )}
           </div>
 
           {/* Auto-suggest banner */}
           {suggestion && (
-            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 flex items-start gap-2.5">
+            <div className="rounded-lg bg-blue-500/15 border border-blue-500/25 p-3 flex items-start gap-2.5">
               <Sparkles className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-blue-700">Suggested from similar transactions</p>
@@ -179,19 +179,19 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
           {/* Edit form */}
           <div className="space-y-3">
             <div>
-              <Label className="text-xs text-zinc-500 mb-1.5 block">Vendor</Label>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Vendor</Label>
               <VendorCombobox value={vendor} onChange={setVendor} />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500 mb-1.5 block">Project</Label>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Project</Label>
               <ProjectCombobox value={project} onChange={setProject} />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500 mb-1.5 block">Category</Label>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Category</Label>
               <CategoryCombobox value={category} onChange={setCategory} />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500 mb-1.5 block">Notes</Label>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Notes</Label>
               <Input
                 placeholder="Add a note..."
                 value={notes}
@@ -199,7 +199,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
               />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500 mb-1.5 block">Tags</Label>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Tags</Label>
               <TagInput value={tags} onChange={setTags} />
             </div>
             <div className="flex items-center gap-2 pt-1">
@@ -208,7 +208,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
                 id="panel-tax"
                 checked={taxDeductible}
                 onChange={(e) => setTaxDeductible(e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-300 cursor-pointer"
+                className="h-4 w-4 rounded border-border cursor-pointer"
               />
               <Label htmlFor="panel-tax" className="cursor-pointer text-sm font-normal">
                 Tax Deductible
@@ -220,7 +220,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
                 id="panel-transfer"
                 checked={isTransfer}
                 onChange={(e) => setIsTransfer(e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-300 cursor-pointer"
+                className="h-4 w-4 rounded border-border cursor-pointer"
               />
               <Label htmlFor="panel-transfer" className="cursor-pointer text-sm font-normal">
                 Transfer — exclude from income &amp; expenses

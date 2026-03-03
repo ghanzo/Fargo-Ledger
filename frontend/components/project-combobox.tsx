@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
-import axios from "axios";
+import api from "@/lib/api";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ export function ProjectCombobox({ value, onChange }: ProjectComboboxProps) {
     if (!open || !activeAccount) return;
     const fetchFacets = async () => {
       try {
-        const res = await axios.get(`http://localhost:8001/facets?account_id=${activeAccount.id}`);
+        const res = await api.get(`/facets?account_id=${activeAccount.id}`);
         setProjects(res.data.projects || []);
       } catch (err) {
         console.error("Failed to load projects", err);
@@ -68,7 +68,7 @@ export function ProjectCombobox({ value, onChange }: ProjectComboboxProps) {
           <CommandList>
             <CommandEmpty>
               <div
-                className="p-2 text-sm cursor-pointer hover:bg-zinc-100"
+                className="p-2 text-sm cursor-pointer hover:bg-muted"
                 onClick={() => {
                   if (inputValue.trim()) {
                     onChange(inputValue.trim());

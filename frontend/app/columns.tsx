@@ -97,7 +97,7 @@ export const columns: ColumnDef<Transaction>[] = [
       return vendor ? (
         <div className="font-medium text-sm">{vendor}</div>
       ) : (
-        <span className="text-zinc-300 text-xs">—</span>
+        <span className="text-muted-foreground text-xs">—</span>
       );
     },
   },
@@ -116,11 +116,11 @@ export const columns: ColumnDef<Transaction>[] = [
     cell: ({ row }) => {
       const project = row.getValue("project") as string;
       return project ? (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-teal-500/15 text-teal-400 border border-teal-500/25 whitespace-nowrap">
           {project}
         </span>
       ) : (
-        <span className="text-zinc-300 text-xs">—</span>
+        <span className="text-muted-foreground text-xs">—</span>
       );
     },
   },
@@ -129,7 +129,7 @@ export const columns: ColumnDef<Transaction>[] = [
     accessorKey: "description",
     header: "Description",
     cell: ({ row }) => (
-      <div className="min-w-[180px] max-w-[280px] whitespace-normal leading-snug text-xs text-zinc-600">
+      <div className="min-w-[180px] max-w-[280px] whitespace-normal leading-snug text-xs text-muted-foreground">
         {row.getValue("description")}
       </div>
     ),
@@ -149,11 +149,11 @@ export const columns: ColumnDef<Transaction>[] = [
     cell: ({ row }) => {
       const category = row.getValue("category") as string;
       return category ? (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 whitespace-nowrap">
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-violet-500/15 text-violet-400 border border-violet-500/25 whitespace-nowrap">
           {category}
         </span>
       ) : (
-        <span className="text-zinc-300 text-xs">—</span>
+        <span className="text-muted-foreground text-xs">—</span>
       );
     },
   },
@@ -181,7 +181,7 @@ export const columns: ColumnDef<Transaction>[] = [
       return (
         <div className="text-right">
           {isTransfer && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-500 mr-1.5">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground mr-1.5">
               Transfer
             </span>
           )}
@@ -200,13 +200,13 @@ export const columns: ColumnDef<Transaction>[] = [
       const notes = row.getValue("notes") as string;
       return notes ? (
         <div
-          className="max-w-[160px] truncate text-xs text-zinc-600"
+          className="max-w-[160px] truncate text-xs text-muted-foreground"
           title={notes}
         >
           {notes}
         </div>
       ) : (
-        <span className="text-zinc-300 text-xs">—</span>
+        <span className="text-muted-foreground text-xs">—</span>
       );
     },
   },
@@ -217,7 +217,7 @@ export const columns: ColumnDef<Transaction>[] = [
     cell: ({ row }) => {
       const tags = row.getValue("tags") as string[] | null;
       if (!tags || tags.length === 0) {
-        return <span className="text-zinc-300 text-xs">—</span>;
+        return <span className="text-muted-foreground text-xs">—</span>;
       }
       return (
         <div className="flex flex-wrap gap-1">
@@ -237,11 +237,11 @@ export const columns: ColumnDef<Transaction>[] = [
     cell: ({ row }) => {
       const taxDeductible = row.getValue("tax_deductible") as boolean | null;
       return taxDeductible ? (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 whitespace-nowrap">
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 whitespace-nowrap">
           ✓ Deductible
         </span>
       ) : (
-        <span className="text-zinc-300 text-xs">—</span>
+        <span className="text-muted-foreground text-xs">—</span>
       );
     },
   },

@@ -25,7 +25,7 @@ interface CategoryLine {
   amount: number;
 }
 
-interface PropertyAgg {
+interface ProjectAgg {
   label: string;
   income: CategoryLine[];
   expenses: CategoryLine[];
@@ -44,7 +44,7 @@ interface TenantData {
   lease_start: string | null; lease_end: string | null;
   monthly_rent: number | null; notes: string | null;
 }
-interface PropertyData {
+interface ProjectData {
   id: number; project_name: string; address: string | null;
   notes: string | null; tenants: TenantData[];
 }
@@ -80,7 +80,7 @@ export default function ReportPage() {
 
   // ── Aggregations ────────────────────────────────────────────────────────────
 
-  const { propertyList, transfersIn, transfersOut, totalIncome, totalExpenses, netIncome, txByPropertyList, txByDate } = useMemo(() => {
+  const { projectList, transfersIn, transfersOut, totalIncome, totalExpenses, netIncome, txByProjectList, txByDate } = useMemo(() => {
     // Separate transfers from P&L transactions
     let tIn  = 0;
     let tOut = 0;
@@ -115,7 +115,7 @@ export default function ReportPage() {
     // Build all project keys (union of income + expense projects)
     const allKeys = new Set([...projectIncomeMap.keys(), ...projectExpenseMap.keys()]);
 
-    const list: [string, PropertyAgg][] = [];
+    const list: [string, ProjectAgg][] = [];
     for (const key of allKeys) {
       const label = key === "__none__" ? "Other / Miscellaneous" : key;
 
@@ -161,7 +161,7 @@ export default function ReportPage() {
     for (const { txs } of txProjMap.values()) {
       txs.sort((a, b) => a.transaction_date.localeCompare(b.transaction_date));
     }
-    const txByPropertyList = [...txProjMap.entries()].sort(([ak], [bk]) => {
+    const txByProjectList = [...txProjMap.entries()].sort(([ak], [bk]) => {
       if (ak === "__none__") return 1;
       if (bk === "__none__") return -1;
       return txProjMap.get(ak)!.label.localeCompare(txProjMap.get(bk)!.label);
@@ -171,13 +171,13 @@ export default function ReportPage() {
     );
 
     return {
-      propertyList:      list,
+      projectList:      list,
       transfersIn:       tIn,
       transfersOut:      tOut,
       totalIncome:       totalInc,
       totalExpenses:     totalExp,
       netIncome:         totalInc - totalExp,
-      txByPropertyList,
+      txByProjectList,
       txByDate,
     };
   }, [transactions]);
@@ -212,7 +212,7 @@ export default function ReportPage() {
         api.get(`/properties?account_id=${activeAccount.id}`),
       ]);
       const vendors: VendorInfoData[]  = vendorRes.data;
-      const properties: PropertyData[] = propsRes.data;
+      const properties: ProjectData[] = propsRes.data;
 
       const wb = new ExcelJS.Workbook();
       wb.creator = activeAccount.name;
@@ -245,8 +245,8 @@ export default function ReportPage() {
 
       const netIncomeRowNums: number[] = [];
 
-      for (const [, prop] of propertyList) {
-        // Property heading
+      for (const [, prop] of projectList) {
+        // Project heading
         const propRow = incWs.addRow([prop.label]);
         propRow.getCell(1).font = { bold: true, size: 11 };
         paintRow(propRow, 2, FILL_SECTION);
@@ -334,19 +334,19 @@ export default function ReportPage() {
       // ── Sheet 3: Check Register ────────────────────────────────────────────
       const regWs = wb.addWorksheet("Check Register");
       regWs.views = [{ state: "frozen", ySplit: 1 }];
-      [12, 15, 36, 20, 18, 14, 14].forEach((w, i) => { regWs.getColumn(i + 1).width = w; });
-      regWs.getColumn(6).numFmt = USD;
+      [12, 15, 36, 20, 18, 20, 14, 14].forEach((w, i) => { regWs.getColumn(i + 1).width = w; });
       regWs.getColumn(7).numFmt = USD;
+      regWs.getColumn(8).numFmt = USD;
 
       // Header row
-      const regHdrRow = regWs.addRow(["Date", "Property", "Description", "Vendor", "Category", "Amount", "Balance"]);
+      const regHdrRow = regWs.addRow(["Date", "Project", "Description", "Vendor", "Category", "Institution", "Amount", "Balance"]);
       regHdrRow.font = { bold: true };
-      paintRow(regHdrRow, 7, FILL_DARK, { bold: true, color: WHITE });
+      paintRow(regHdrRow, 8, FILL_DARK, { bold: true, color: WHITE });
 
       // Starting balance
-      const startBalRow = regWs.addRow(["Starting Balance", "", "", "", "", beginBal, beginBal]);
+      const startBalRow = regWs.addRow(["Starting Balance", "", "", "", "", "", beginBal, beginBal]);
       startBalRow.font = { bold: true };
-      paintRow(startBalRow, 7, FILL_SECTION);
+      paintRow(startBalRow, 8, FILL_SECTION);
 
       // Transaction rows — running balance: G_prev + F_this
       let regRowNum = 2;  // starting balance is row 2
@@ -359,19 +359,20 @@ export default function ReportPage() {
           tx.description,
           tx.vendor    ?? "",
           tx.category  ?? (tx.is_transfer ? "Transfer" : ""),
+          tx.institution ?? "",
           amount,
-          fml(`G${regRowNum - 1}+F${regRowNum}`, 0),
+          fml(`H${regRowNum - 1}+G${regRowNum}`, 0),
         ]);
       }
 
       // NET TOTAL row
       if (txByDate.length > 0) {
         const txTotal    = txByDate.reduce((s, tx) => s + parseFloat(String(tx.amount)), 0);
-        const totalRow   = regWs.addRow(["", "", "", "", "NET TOTAL", fml(`SUM(F3:F${regRowNum})`, txTotal), ""]);
-        totalRow.getCell(5).font = { bold: true };
+        const totalRow   = regWs.addRow(["", "", "", "", "", "NET TOTAL", fml(`SUM(G3:G${regRowNum})`, txTotal), ""]);
         totalRow.getCell(6).font = { bold: true };
-        totalRow.getCell(6).border = { top: BORDER_MED };
-        paintRow(totalRow, 7, FILL_SECTION);
+        totalRow.getCell(7).font = { bold: true };
+        totalRow.getCell(7).border = { top: BORDER_MED };
+        paintRow(totalRow, 8, FILL_SECTION);
       }
 
       // ── Sheet 4: Management ────────────────────────────────────────────────
@@ -415,9 +416,9 @@ export default function ReportPage() {
       mgmtWs.addRow([]);
       mgmtWs.addRow([]);
 
-      // Properties & Tenants
-      mgmtSectionHdr("PROPERTIES & TENANTS");
-      mgmtColHdr(["Property / Tenant", "Address / Phone", "Email", "Lease Start", "Lease End", "$/mo", "Notes"]);
+      // Projects & Tenants
+      mgmtSectionHdr("PROJECTS & TENANTS");
+      mgmtColHdr(["Project / Tenant", "Address / Phone", "Email", "Lease Start", "Lease End", "$/mo", "Notes"]);
 
       for (const prop of properties) {
         const propRow = mgmtWs.addRow([prop.project_name, prop.address ?? ""]);
@@ -579,18 +580,18 @@ export default function ReportPage() {
 
         {/* 2. SUMMARY TABLE */}
         <section className="mb-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-3">Properties</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-3">Projects</h2>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left pb-1.5 font-semibold text-foreground">Property</th>
+                <th className="text-left pb-1.5 font-semibold text-foreground">Project</th>
                 <th className="text-right pb-1.5 font-semibold text-foreground w-32">Income</th>
                 <th className="text-right pb-1.5 font-semibold text-foreground w-32">Expenses</th>
                 <th className="text-right pb-1.5 font-semibold text-foreground w-32">Net</th>
               </tr>
             </thead>
             <tbody>
-              {propertyList.map(([key, prop]) => (
+              {projectList.map(([key, prop]) => (
                 <tr key={key} className="border-b border-border">
                   <td className="py-1.5 text-foreground">{prop.label}</td>
                   <td className="py-1.5 text-right tabular-nums text-emerald-700">{fmt(prop.totalIncome)}</td>
@@ -614,13 +615,13 @@ export default function ReportPage() {
           </table>
         </section>
 
-        {/* 3. INCOME STATEMENTS — per property */}
+        {/* 3. INCOME STATEMENTS — per project */}
         <section className="mb-10">
           <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Income Statements</h2>
           <div className="space-y-8">
-            {propertyList.map(([key, prop]) => (
+            {projectList.map(([key, prop]) => (
               <div key={key} className="print:break-inside-avoid">
-                {/* Property heading */}
+                {/* Project heading */}
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-1 h-5 bg-zinc-800 rounded-sm" />
                   <span className="font-bold text-sm uppercase tracking-wide text-foreground">{prop.label}</span>
@@ -721,11 +722,11 @@ export default function ReportPage() {
           </div>
         </section>
 
-        {/* 5. TRANSACTIONS BY PROPERTY */}
+        {/* 5. TRANSACTIONS BY PROJECT */}
         <section className="mt-12 mb-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-4">Transactions by Property</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-foreground mb-4">Transactions by Project</h2>
           <div className="space-y-8">
-            {txByPropertyList.map(([key, { label, txs }]) => {
+            {txByProjectList.map(([key, { label, txs }]) => {
               const subtotal = txs.reduce((s, tx) => s + parseFloat(String(tx.amount)), 0);
               return (
                 <div key={key} className="print:break-inside-avoid">
@@ -792,10 +793,11 @@ export default function ReportPage() {
             <thead>
               <tr className="border-b-2 border-border">
                 <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Date</th>
-                <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Property</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-24">Project</th>
                 <th className="text-left pb-1.5 font-medium text-muted-foreground">Description</th>
                 <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Vendor</th>
                 <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Category</th>
+                <th className="text-left pb-1.5 font-medium text-muted-foreground w-28">Institution</th>
                 <th className="text-right pb-1.5 font-medium text-muted-foreground w-24">Amount</th>
                 <th className="text-right pb-1.5 font-medium text-muted-foreground w-28">Balance</th>
               </tr>
@@ -820,6 +822,7 @@ export default function ReportPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    <td className="py-1 pr-2 text-muted-foreground truncate">{tx.institution ?? <span className="text-muted-foreground">—</span>}</td>
                     <td className={`py-1 text-right font-mono tabular-nums ${amtClass}`}>
                       {amount >= 0 ? "+" : "−"}{fmt(amount)}
                     </td>
@@ -832,7 +835,7 @@ export default function ReportPage() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-zinc-400">
-                <td colSpan={5} className="pt-2 font-bold text-foreground text-sm">Ending Balance (Dec 31, {year})</td>
+                <td colSpan={6} className="pt-2 font-bold text-foreground text-sm">Ending Balance (Dec 31, {year})</td>
                 <td colSpan={2} className={`pt-2 text-right font-bold font-mono tabular-nums text-sm ${endingBal >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                   {fmt(endingBal)}
                 </td>

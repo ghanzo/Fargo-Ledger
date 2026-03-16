@@ -107,7 +107,7 @@ export function ImportDialog({ open, onOpenChange, onSuccess, accountId }: Impor
               <div className="space-y-2">
                 <Upload className="h-8 w-8 text-muted-foreground mx-auto" />
                 <p className="text-sm text-muted-foreground">Drop a CSV file here, or click to browse</p>
-                <p className="text-xs text-muted-foreground">Wells Fargo export format</p>
+                <p className="text-xs text-muted-foreground">Wells Fargo · Redwood Credit Union</p>
               </div>
             )}
           </div>

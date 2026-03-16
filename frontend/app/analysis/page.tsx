@@ -1,15 +1,22 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Settings2, ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
 import { BudgetDialog } from "@/components/budget-dialog";
+import { BulkEditDialog } from "@/components/bulk-edit-dialog";
 import { TransactionPanel } from "@/components/transaction-panel";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -328,76 +335,257 @@ function TransactionTable({
   showCategory,
   showVendor,
   onSelect,
+  onBulkSuccess,
 }: {
   transactions: Transaction[];
   showCategory: boolean;
   showVendor?: boolean;
   onSelect: (tx: Transaction) => void;
+  onBulkSuccess?: () => void;
 }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<"date" | "amount" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const lastClicked = useRef<number | null>(null);
+
+  // Reset selection and search when transactions change
+  useEffect(() => { setSelected(new Set()); lastClicked.current = null; setSearch(""); setSortKey(null); }, [transactions]);
+
+  const toggleSort = (key: "date" | "amount") => {
+    if (sortKey === key) {
+      if (sortDir === "asc") setSortDir("desc");
+      else { setSortKey(null); setSortDir("asc"); }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const filtered = useMemo(() => {
+    let result = transactions;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((tx) =>
+        tx.description.toLowerCase().includes(q) ||
+        (tx.vendor && tx.vendor.toLowerCase().includes(q)) ||
+        (tx.category && tx.category.toLowerCase().includes(q)) ||
+        (tx.notes && tx.notes.toLowerCase().includes(q)) ||
+        (tx.tags && tx.tags.some((t) => t.toLowerCase().includes(q))) ||
+        tx.transaction_date.includes(q) ||
+        String(tx.amount).includes(q)
+      );
+    }
+    if (sortKey) {
+      result = [...result].sort((a, b) => {
+        let cmp = 0;
+        if (sortKey === "date") cmp = a.transaction_date.localeCompare(b.transaction_date);
+        else cmp = parseFloat(String(a.amount)) - parseFloat(String(b.amount));
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    }
+    return result;
+  }, [transactions, search, sortKey, sortDir]);
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map((tx) => tx.id)));
+  };
+
+  const handleRowClick = (e: React.MouseEvent, tx: Transaction, idx: number) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-row-checkbox]")) {
+      toggleOne(tx.id);
+      lastClicked.current = idx;
+      return;
+    }
+    if (target.closest("button") || target.closest('[role="menuitem"]') || target.closest("[data-radix-popper-content-wrapper]")) return;
+
+    if (e.shiftKey) {
+      e.preventDefault();
+      if (lastClicked.current !== null) {
+        const start = Math.min(lastClicked.current, idx);
+        const end = Math.max(lastClicked.current, idx);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (let i = start; i <= end; i++) next.add(filtered[i].id);
+          return next;
+        });
+      } else {
+        toggleOne(tx.id);
+      }
+      lastClicked.current = idx;
+    } else {
+      lastClicked.current = idx;
+      onSelect(tx);
+    }
+  };
+
+  const selectedTxs = transactions.filter((tx) => selected.has(tx.id));
+
   if (transactions.length === 0) {
     return <div className="text-sm text-muted-foreground py-8 text-center">No transactions found.</div>;
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left">
-            <th className="pb-2 text-xs font-medium text-muted-foreground">Date</th>
-            <th className="pb-2 text-xs font-medium text-muted-foreground text-right">Amount</th>
-            {showCategory && <th className="pb-2 text-xs font-medium text-muted-foreground">Category</th>}
-            {showVendor && <th className="pb-2 text-xs font-medium text-muted-foreground">Vendor</th>}
-            <th className="pb-2 text-xs font-medium text-muted-foreground">Notes</th>
-            <th className="pb-2 text-xs font-medium text-muted-foreground">Tags</th>
-          </tr>
-        </thead>
-        <tbody>
-          {transactions.map((tx) => {
-            const amount = parseFloat(String(tx.amount));
-            return (
-              <tr
-                key={tx.id}
-                onClick={() => onSelect(tx)}
-                className="border-b last:border-0 hover:bg-muted cursor-pointer transition-colors"
-              >
-                <td className="py-2.5 text-muted-foreground whitespace-nowrap">{tx.transaction_date}</td>
-                <td className={`py-2.5 text-right font-medium whitespace-nowrap ${amount > 0 ? "text-emerald-600" : "text-foreground"}`}>
-                  {amount > 0 ? "+" : ""}{fmt(Math.abs(amount))}
-                </td>
-                {showCategory && (
-                  <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
-                    {tx.category ?? <span className="text-muted-foreground italic">—</span>}
-                  </td>
-                )}
-                {showVendor && (
-                  <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
-                    {tx.vendor ?? <span className="text-muted-foreground italic">—</span>}
-                  </td>
-                )}
-                <td className="py-2.5 text-muted-foreground max-w-[200px] truncate">
-                  {tx.notes ?? <span className="text-muted-foreground italic">—</span>}
-                </td>
-                <td className="py-2.5 max-w-[150px]">
-                  {tx.tags && tx.tags.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {tx.tags.slice(0, 3).map((t) => (
-                        <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">
-                          {t}
-                        </span>
-                      ))}
-                      {tx.tags.length > 3 && (
-                        <span className="text-xs text-muted-foreground">+{tx.tags.length - 3}</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground italic">—</span>
+    <>
+      <div className="flex items-center gap-3 mb-3">
+        <Input
+          placeholder="Search transactions..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs h-8 text-sm"
+        />
+        <span className="text-xs text-muted-foreground">
+          {filtered.length === transactions.length
+            ? `${transactions.length} transactions`
+            : `${filtered.length} of ${transactions.length} transactions`}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left">
+              <th className="pb-2 w-8">
+                <span data-row-checkbox="true" className="flex items-center">
+                  <Checkbox
+                    checked={selected.size === filtered.length && filtered.length > 0}
+                    onCheckedChange={toggleAll}
+                    aria-label="Select all"
+                  />
+                </span>
+              </th>
+              <th className="pb-2 text-xs font-medium text-muted-foreground">
+                <button onClick={() => toggleSort("date")} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+                  Date {sortKey === "date" ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                </button>
+              </th>
+              <th className="pb-2 text-xs font-medium text-muted-foreground text-right">
+                <button onClick={() => toggleSort("amount")} className="inline-flex items-center gap-1 hover:text-foreground transition-colors ml-auto">
+                  Amount {sortKey === "amount" ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                </button>
+              </th>
+              {showCategory && <th className="pb-2 text-xs font-medium text-muted-foreground">Category</th>}
+              {showVendor && <th className="pb-2 text-xs font-medium text-muted-foreground">Vendor</th>}
+              <th className="pb-2 text-xs font-medium text-muted-foreground">Description</th>
+              <th className="pb-2 text-xs font-medium text-muted-foreground">Notes</th>
+              <th className="pb-2 text-xs font-medium text-muted-foreground">Tags</th>
+              <th className="pb-2 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((tx, idx) => {
+              const amount = parseFloat(String(tx.amount));
+              const isSelected = selected.has(tx.id);
+              return (
+                <tr
+                  key={tx.id}
+                  onClick={(e) => handleRowClick(e, tx, idx)}
+                  onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                  className={cn(
+                    "border-b last:border-0 hover:bg-muted cursor-pointer transition-colors",
+                    isSelected && "bg-blue-500/10"
                   )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                >
+                  <td className="py-2.5">
+                    <span data-row-checkbox="true" className="flex items-center">
+                      <Checkbox checked={isSelected} aria-label="Select row" />
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-muted-foreground whitespace-nowrap">{tx.transaction_date}</td>
+                  <td className={`py-2.5 text-right font-medium whitespace-nowrap ${amount > 0 ? "text-emerald-600" : "text-foreground"}`}>
+                    {amount > 0 ? "+" : ""}{fmt(Math.abs(amount))}
+                  </td>
+                  {showCategory && (
+                    <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
+                      {tx.category ?? <span className="text-muted-foreground italic">—</span>}
+                    </td>
+                  )}
+                  {showVendor && (
+                    <td className="py-2.5 text-muted-foreground max-w-[120px] truncate">
+                      {tx.vendor ?? <span className="text-muted-foreground italic">—</span>}
+                    </td>
+                  )}
+                  <td className="py-2.5 text-muted-foreground max-w-[200px] truncate text-xs">
+                    {tx.description}
+                  </td>
+                  <td className="py-2.5 text-muted-foreground max-w-[160px] truncate">
+                    {tx.notes ?? <span className="text-muted-foreground italic">—</span>}
+                  </td>
+                  <td className="py-2.5 max-w-[150px]">
+                    {tx.tags && tx.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {tx.tags.slice(0, 3).map((t) => (
+                          <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">
+                            {t}
+                          </span>
+                        ))}
+                        {tx.tags.length > 3 && (
+                          <span className="text-xs text-muted-foreground">+{tx.tags.length - 3}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground italic">—</span>
+                    )}
+                  </td>
+                  <td className="py-2.5">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" className="h-7 w-7 p-0">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => onSelect(tx)}>Edit Details</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(tx.id)}>Copy ID</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Floating action bar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-4 z-50 animate-in slide-in-from-bottom-5 fade-in">
+          <span className="text-sm font-medium">{selected.size} selected</span>
+          <div className="h-4 w-px bg-zinc-700" />
+          <Button size="sm" variant="secondary" className="h-8 text-xs hover:bg-muted" onClick={() => setBulkOpen(true)}>
+            Categorize / Edit
+          </Button>
+          <Button
+            size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground hover:text-white hover:bg-zinc-800"
+            onClick={() => { setSelected(new Set()); lastClicked.current = null; }}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+
+      <BulkEditDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        selectedIds={[...selected]}
+        selectedTransactions={selectedTxs}
+        onSuccess={() => {
+          setSelected(new Set());
+          lastClicked.current = null;
+          onBulkSuccess?.();
+        }}
+      />
+    </>
   );
 }
 
@@ -585,14 +773,7 @@ export default function AnalysisPage() {
           if (aPos) return b.total - a.total;         // income: high → low
           return a.total - b.total;                   // expense: most negative first
         });
-      const cats = sortCats([...catRes.data]);
-      if (uncategorized.length > 0) {
-        const total = uncategorized.reduce(
-          (sum, tx) => sum + parseFloat(String(tx.amount)), 0
-        );
-        cats.push({ category: "(Uncategorized)", total: Math.round(total * 100) / 100 });
-      }
-      setCategories(cats);
+      setCategories(sortCats([...catRes.data]));
       setBudgetStatuses(budRes.data);
     } catch {
       // silent
@@ -706,7 +887,9 @@ export default function AnalysisPage() {
   const fetchProjCategoryTxns = useCallback(async (project: string | null, category: string) => {
     setLoadingDrill(true);
     try {
-      const extra: Record<string, string> = { category };
+      const extra: Record<string, string> = {};
+      if (category === "(Uncategorized)") extra.has_category = "false";
+      else extra.category = category;
       if (project === null) extra.has_project = "false";
       else extra.project = project;
       const res = await api.get(`/transactions${buildQs(extra)}`);
@@ -958,6 +1141,7 @@ export default function AnalysisPage() {
                     showCategory={false}
                     showVendor={catDrill.directTx}
                     onSelect={handleOpenPanel}
+                    onBulkSuccess={handlePanelSave}
                   />
                 )
               )}
@@ -993,6 +1177,7 @@ export default function AnalysisPage() {
                     transactions={transactions}
                     showCategory
                     onSelect={handleOpenPanel}
+                    onBulkSuccess={handlePanelSave}
                   />
                 )
               )}
@@ -1039,6 +1224,7 @@ export default function AnalysisPage() {
                     showCategory={false}
                     showVendor
                     onSelect={handleOpenPanel}
+                    onBulkSuccess={handlePanelSave}
                   />
                 )
               )}

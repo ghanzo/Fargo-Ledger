@@ -20,6 +20,7 @@ class TransactionUpdate(BaseModel):
     category:       Optional[str]       = None
     vendor:         Optional[str]       = None
     project:        Optional[str]       = None
+    institution:    Optional[str]       = None
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
@@ -36,6 +37,7 @@ class TransactionRestore(BaseModel):
     vendor:         Optional[str]       = None
     category:       Optional[str]       = None
     project:        Optional[str]       = None
+    institution:    Optional[str]       = None
     notes:          Optional[str]       = None
     tags:           Optional[List[str]] = None
     tax_deductible: Optional[bool]      = None
@@ -49,6 +51,7 @@ class TransactionResponse(BaseModel):
     description:      str
     amount:           float
     source_file:      str
+    institution:      Optional[str]       = None
     category:         Optional[str]       = None
     vendor:           Optional[str]       = None
     project:          Optional[str]       = None

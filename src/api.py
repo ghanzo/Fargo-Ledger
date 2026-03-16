@@ -222,7 +222,7 @@ def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session =
     if tx.auto_categorized and any(k in update_dict for k in ("vendor", "category", "project")):
         tx.auto_categorized = False
 
-    for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_transfer", "is_cleaned"):
+    for field in ("category", "vendor", "project", "notes", "tags", "tax_deductible", "is_transfer", "is_cleaned", "institution"):
         val = getattr(update_data, field)
         if val is not None:
             setattr(tx, field, val)
@@ -269,10 +269,17 @@ def get_facets(account_id: int = Query(...), db: Session = Depends(get_db)):
         .filter(Transaction.account_id == account_id, Transaction.project != None)
         .all()
     )
+    institutions = (
+        db.query(Transaction.institution)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.institution != None)
+        .all()
+    )
     return {
-        "categories": sorted([c[0] for c in categories if c[0]]),
-        "vendors":    sorted([v[0] for v in vendors    if v[0]]),
-        "projects":   sorted([p[0] for p in projects   if p[0]]),
+        "categories":   sorted([c[0] for c in categories   if c[0]]),
+        "vendors":      sorted([v[0] for v in vendors       if v[0]]),
+        "projects":     sorted([p[0] for p in projects      if p[0]]),
+        "institutions": sorted([i[0] for i in institutions  if i[0]]),
     }
 
 
@@ -472,7 +479,6 @@ def get_category_breakdown(
 ):
     query = db.query(Transaction.category, func.sum(Transaction.amount)).filter(
         Transaction.account_id == account_id,
-        Transaction.category != None,
     )
     if project == "__none__":
         query = query.filter(Transaction.project == None)
@@ -480,7 +486,7 @@ def get_category_breakdown(
         query = query.filter(Transaction.project == project)
     query = apply_date_filter(query, date_from, date_to)
     results = query.group_by(Transaction.category).all()
-    return [{"category": r[0], "total": round(float(r[1]), 2)} for r in results]
+    return [{"category": r[0] or "(Uncategorized)", "total": round(float(r[1]), 2)} for r in results]
 
 
 @app.get("/stats/project_breakdown")
@@ -660,6 +666,7 @@ def bulk_restore_transactions(snapshots: List[TransactionRestore], db: Session =
         tx.vendor          = snap.vendor
         tx.category        = snap.category
         tx.project         = snap.project
+        tx.institution     = snap.institution
         tx.notes           = snap.notes
         tx.tags            = snap.tags
         tx.tax_deductible  = snap.tax_deductible

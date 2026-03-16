@@ -36,6 +36,7 @@ class Transaction(Base):
     # Metadata
     source_file = Column(String, nullable=False)
     raw_data = Column(JSON, nullable=False)
+    institution = Column(String, nullable=True)     # e.g. "Wells Fargo", "Redwood Credit Union"
 
     # --- NEW FIELDS FOR "DATA GRID" ---
     category = Column(String, nullable=True)     # e.g. "Food"

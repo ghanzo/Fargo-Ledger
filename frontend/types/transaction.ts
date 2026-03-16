@@ -11,6 +11,7 @@ export interface Transaction {
   tax_deductible: boolean | null;
   is_transfer: boolean;
   source_file: string;
+  institution: string | null;
   is_cleaned: boolean;
   created_at: string | null;
   updated_at: string | null;

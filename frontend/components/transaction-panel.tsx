@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { VendorCombobox } from "@/components/vendor-combobox";
 import { CategoryCombobox } from "@/components/category-combobox";
 import { ProjectCombobox } from "@/components/project-combobox";
+import { InstitutionCombobox } from "@/components/institution-combobox";
 import { TagInput } from "@/components/tag-input";
 import { toast } from "sonner";
 
@@ -24,6 +25,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
   const [vendor,       setVendor]       = useState("");
   const [category,     setCategory]     = useState("");
   const [project,      setProject]      = useState("");
+  const [institution,  setInstitution]  = useState("");
   const [notes,        setNotes]        = useState("");
   const [tags,         setTags]         = useState<string[]>([]);
   const [taxDeductible,setTaxDeductible]= useState(false);
@@ -38,6 +40,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     setVendor(transaction.vendor || "");
     setCategory(transaction.category || "");
     setProject(transaction.project || "");
+    setInstitution(transaction.institution || "");
     setNotes(transaction.notes || "");
     setTags(transaction.tags || []);
     setTaxDeductible(transaction.tax_deductible ?? false);
@@ -74,10 +77,11 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     setLoading(true);
     try {
       await api.put(`/transactions/${transaction.id}`, {
-        vendor:        vendor   || null,
-        category:      category || null,
-        project:       project  || null,
-        notes:         notes    || null,
+        vendor:        vendor      || null,
+        category:      category    || null,
+        project:       project     || null,
+        institution:   institution || null,
+        notes:         notes       || null,
         tags:          tags.length > 0 ? tags : null,
         tax_deductible: taxDeductible,
         is_transfer:   isTransfer,
@@ -189,6 +193,10 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
             <div>
               <Label className="text-xs text-muted-foreground mb-1.5 block">Category</Label>
               <CategoryCombobox value={category} onChange={setCategory} />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Institution</Label>
+              <InstitutionCombobox value={institution} onChange={setInstitution} />
             </div>
             <div>
               <Label className="text-xs text-muted-foreground mb-1.5 block">Notes</Label>

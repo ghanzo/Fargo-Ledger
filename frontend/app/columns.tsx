@@ -124,7 +124,30 @@ export const columns: ColumnDef<Transaction>[] = [
       );
     },
   },
-  // 5. DESCRIPTION
+  // 5. INSTITUTION
+  {
+    accessorKey: "institution",
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+      >
+        Institution
+        <ArrowUpDown className="ml-2 h-4 w-4" />
+      </Button>
+    ),
+    cell: ({ row }) => {
+      const institution = row.getValue("institution") as string;
+      return institution ? (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-sky-500/15 text-sky-400 border border-sky-500/25 whitespace-nowrap">
+          {institution}
+        </span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      );
+    },
+  },
+  // 6. DESCRIPTION
   {
     accessorKey: "description",
     header: "Description",

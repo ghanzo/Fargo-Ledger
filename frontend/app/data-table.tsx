@@ -10,6 +10,7 @@ import {
   getFilteredRowModel,
   Row,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -55,6 +56,8 @@ function FilterPill({
 }
 // ────────────────────────────────────────────────────────────────────────────
 
+const ROW_HEIGHT = 44; // estimated row height in px
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -75,6 +78,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
   const [filterVendor,         setFilterVendor]         = usePersistentState<FilterState>("dt:filterVendor", null);
   const [filterCategory,       setFilterCategory]       = usePersistentState<FilterState>("dt:filterCategory", null);
   const [filterProject,        setFilterProject]        = usePersistentState<FilterState>("dt:filterProject", null);
+  const [filterInstitution,    setFilterInstitution]    = usePersistentState<FilterState>("dt:filterInstitution", null);
   const [filterTaxDeductible,  setFilterTaxDeductible]  = usePersistentState<FilterState>("dt:filterTaxDeductible", null);
   const [filterCategorized,    setFilterCategorized]    = usePersistentState<FilterState>("dt:filterCategorized", null);
   const [dateFrom, setDateFrom] = usePersistentState<string>("dt:dateFrom", "");
@@ -82,7 +86,9 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
 
   const lastSelectedIndex = useRef<number | null>(null);
   const [focusedIndex,   setFocusedIndex]   = useState<number | null>(null);
-  const rowRefs          = useRef<(HTMLTableRowElement | null)[]>([]);
+
+  // Scroll container ref for virtualizer
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Client-side filtering
   const filteredData = useMemo(() => {
@@ -93,6 +99,8 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     else if (filterCategory === false)result = result.filter((tx) => !tx.category);
     if (filterProject === true)       result = result.filter((tx) => !!tx.project);
     else if (filterProject === false) result = result.filter((tx) => !tx.project);
+    if (filterInstitution === true)   result = result.filter((tx) => !!tx.institution);
+    else if (filterInstitution === false) result = result.filter((tx) => !tx.institution);
     if (filterTaxDeductible === true) result = result.filter((tx) => !!tx.tax_deductible);
     else if (filterTaxDeductible === false) result = result.filter((tx) => !tx.tax_deductible);
     if (filterCategorized === true)   result = result.filter((tx) => tx.is_cleaned);
@@ -100,7 +108,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     if (dateFrom) result = result.filter((tx) => tx.transaction_date >= dateFrom);
     if (dateTo)   result = result.filter((tx) => tx.transaction_date <= dateTo);
     return result as unknown as TData[];
-  }, [data, filterVendor, filterCategory, filterProject, filterTaxDeductible, filterCategorized, dateFrom, dateTo]);
+  }, [data, filterVendor, filterCategory, filterProject, filterInstitution, filterTaxDeductible, filterCategorized, dateFrom, dateTo]);
 
   const openPanel = useCallback((tx: Transaction) => {
     setPanelTx(tx);
@@ -120,14 +128,24 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     meta: { onRefresh, openPanel },
   });
 
+  const { rows } = table.getRowModel();
+
+  // ── Virtualizer ──────────────────────────────────────────────────────────
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 15,
+  });
+
   const selectedRows         = table.getFilteredSelectedRowModel().rows;
   const selectedIds          = selectedRows.map((row: any) => row.original.id);
   const selectedTransactions = selectedRows.map((row: any) => row.original as Transaction);
 
   // ── CSV export ─────────────────────────────────────────────────────────
   const exportCsv = useCallback(() => {
-    const rows = table.getRowModel().rows.map((r) => r.original as Transaction);
-    const headers = ["Date", "Description", "Vendor", "Category", "Amount", "Notes", "Tags", "Tax Deductible", "Status"];
+    const allRows = table.getRowModel().rows.map((r) => r.original as Transaction);
+    const headers = ["Date", "Description", "Vendor", "Category", "Amount", "Institution", "Notes", "Tags", "Tax Deductible", "Status"];
     const escape = (v: unknown) => {
       const s = v == null ? "" : String(v);
       return s.includes(",") || s.includes('"') || s.includes("\n")
@@ -135,9 +153,9 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     };
     const lines = [
       headers.join(","),
-      ...rows.map((tx) => [
+      ...allRows.map((tx) => [
         tx.transaction_date, tx.description, tx.vendor ?? "",
-        tx.category ?? "", tx.amount,
+        tx.category ?? "", tx.amount, tx.institution ?? "",
         tx.notes ?? "", (tx.tags ?? []).join("; "),
         tx.tax_deductible ? "Yes" : "", tx.is_cleaned ? "Cleaned" : "Uncleaned",
       ].map(escape).join(",")),
@@ -155,21 +173,20 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      const rows = table.getRowModel().rows;
-      const len  = rows.length;
+      const len = rows.length;
 
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         setFocusedIndex((prev) => {
           const next = prev === null ? 0 : Math.min(prev + 1, len - 1);
-          rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
+          virtualizer.scrollToIndex(next, { align: "auto" });
           return next;
         });
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
         setFocusedIndex((prev) => {
           const next = prev === null ? 0 : Math.max(prev - 1, 0);
-          rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
+          virtualizer.scrollToIndex(next, { align: "auto" });
           return next;
         });
       } else if (e.key === " " && focusedIndex !== null) {
@@ -190,17 +207,17 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [table, focusedIndex, panelOpen, openPanel]);
+  }, [table, rows, focusedIndex, panelOpen, openPanel, virtualizer]);
 
   const activeFilterCount = [
     filterVendor !== null, filterCategory !== null, filterProject !== null,
-    filterTaxDeductible !== null, filterCategorized !== null,
+    filterInstitution !== null, filterTaxDeductible !== null, filterCategorized !== null,
     !!dateFrom, !!dateTo,
   ].filter(Boolean).length;
 
   const clearFilters = () => {
     setFilterVendor(null); setFilterCategory(null); setFilterProject(null);
-    setFilterTaxDeductible(null); setFilterCategorized(null);
+    setFilterInstitution(null); setFilterTaxDeductible(null); setFilterCategorized(null);
     setDateFrom(""); setDateTo("");
   };
 
@@ -219,6 +236,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
           <FilterPill offLabel="Vendor"   onLabel="Has Vendor"   offOnLabel="No Vendor"       value={filterVendor}        onChange={setFilterVendor} />
           <FilterPill offLabel="Category" onLabel="Has Category" offOnLabel="No Category"     value={filterCategory}      onChange={setFilterCategory} />
           <FilterPill offLabel="Project"  onLabel="Has Project"  offOnLabel="No Project"      value={filterProject}       onChange={setFilterProject} />
+          <FilterPill offLabel="Institution" onLabel="Has Institution" offOnLabel="No Institution" value={filterInstitution} onChange={setFilterInstitution} />
           <FilterPill offLabel="Tax"      onLabel="Tax Deductible" offOnLabel="Not Deductible" value={filterTaxDeductible} onChange={setFilterTaxDeductible} />
           <FilterPill offLabel="Status"   onLabel="Categorized" offOnLabel="Uncategorized"    value={filterCategorized}   onChange={setFilterCategorized} />
           {activeFilterCount > 0 && (
@@ -239,7 +257,7 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
           <span className="text-muted-foreground text-xs">→</span>
           <Input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   className="w-[140px] text-xs h-7" />
           <span className="text-xs text-muted-foreground ml-1">
-            {table.getRowModel().rows.length.toLocaleString()} of {(data as any[]).length.toLocaleString()} transactions
+            {rows.length.toLocaleString()} of {(data as any[]).length.toLocaleString()} transactions
           </span>
           <div className="ml-auto">
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={exportCsv}>
@@ -250,7 +268,11 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
       </div>
 
       {/* ── TABLE ───────────────────────────────────────────────────── */}
-      <div className="rounded-md border overflow-auto" style={{ maxHeight: "calc(100vh - 300px)" }}>
+      <div
+        ref={scrollRef}
+        className="rounded-md border overflow-auto"
+        style={{ maxHeight: "calc(100vh - 300px)" }}
+      >
         <Table>
           <TableHeader className="sticky top-0 bg-background z-10 shadow-[0_1px_0_0_var(--border)]">
             {table.getHeaderGroups().map((headerGroup) => (
@@ -264,47 +286,63 @@ export function DataTable<TData, TValue>({ columns, data, onRefresh }: DataTable
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row, rowIndex) => (
-                <TableRow
-                  key={row.id}
-                  ref={(el) => { rowRefs.current[rowIndex] = el; }}
-                  data-state={row.getIsSelected() && "selected"}
-                  className={cn("cursor-pointer", focusedIndex === rowIndex && "outline outline-2 outline-blue-400 outline-offset-[-2px]")}
-                  onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
-                  onClick={(e) => {
-                    const target = e.target as HTMLElement;
-                    const isCheckbox = !!target.closest("[data-row-checkbox]");
+            {rows.length ? (
+              <>
+                {/* Top spacer */}
+                {virtualizer.getVirtualItems()[0]?.start > 0 && (
+                  <tr style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                )}
+                {/* Visible rows */}
+                {virtualizer.getVirtualItems().map((virtualRow) => {
+                  const row = rows[virtualRow.index];
+                  const rowIndex = virtualRow.index;
+                  return (
+                    <TableRow
+                      key={row.id}
+                      data-index={virtualRow.index}
+                      ref={virtualizer.measureElement}
+                      data-state={row.getIsSelected() && "selected"}
+                      className={cn("cursor-pointer", focusedIndex === rowIndex && "outline outline-2 outline-blue-400 outline-offset-[-2px]")}
+                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        const isCheckbox = !!target.closest("[data-row-checkbox]");
 
-                    // Block dropdown triggers and menu items
-                    if (!isCheckbox && target.closest("button")) return;
-                    if (target.closest('[role="menuitem"]') || target.closest("[data-radix-popper-content-wrapper]")) return;
+                        // Block dropdown triggers and menu items
+                        if (!isCheckbox && target.closest("button")) return;
+                        if (target.closest('[role="menuitem"]') || target.closest("[data-radix-popper-content-wrapper]")) return;
 
-                    if (e.shiftKey) {
-                      // Range select from last clicked row
-                      if (lastSelectedIndex.current !== null) {
-                        const start = Math.min(lastSelectedIndex.current, rowIndex);
-                        const end   = Math.max(lastSelectedIndex.current, rowIndex);
-                        table.getRowModel().rows.slice(start, end + 1).forEach((r) => r.toggleSelected(true));
-                      }
-                      lastSelectedIndex.current = rowIndex;
-                    } else if (isCheckbox) {
-                      // Checkbox click = toggle selection
-                      row.toggleSelected(!row.getIsSelected());
-                      lastSelectedIndex.current = rowIndex;
-                    } else {
-                      // Regular row click = open detail panel
-                      openPanel(row.original as Transaction);
-                    }
-                  }}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+                        if (e.shiftKey) {
+                          // Range select from last clicked row
+                          if (lastSelectedIndex.current !== null) {
+                            const start = Math.min(lastSelectedIndex.current, rowIndex);
+                            const end   = Math.max(lastSelectedIndex.current, rowIndex);
+                            rows.slice(start, end + 1).forEach((r) => r.toggleSelected(true));
+                          }
+                          lastSelectedIndex.current = rowIndex;
+                        } else if (isCheckbox) {
+                          // Checkbox click = toggle selection
+                          row.toggleSelected(!row.getIsSelected());
+                          lastSelectedIndex.current = rowIndex;
+                        } else {
+                          // Regular row click = open detail panel
+                          openPanel(row.original as Transaction);
+                        }
+                      }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+                {/* Bottom spacer */}
+                {virtualizer.getVirtualItems().length > 0 && (
+                  <tr style={{ height: virtualizer.getTotalSize() - (virtualizer.getVirtualItems().at(-1)?.end ?? 0) }} />
+                )}
+              </>
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">

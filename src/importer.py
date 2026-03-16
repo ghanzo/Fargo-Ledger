@@ -88,18 +88,51 @@ _CONFIDENCE_CLEAN_THRESHOLD  = 0.85  # auto-assign + mark is_cleaned
 _CONFIDENCE_ASSIGN_THRESHOLD = 0.70  # auto-assign only (leave is_cleaned=False)
 
 
-def import_csv_content(content: bytes, source_file: str, db: Session, account_id: int) -> dict:
+def _detect_and_parse_csv(content: bytes) -> tuple[pd.DataFrame, str]:
     """
-    Parse Wells Fargo CSV bytes and insert new transactions into the database.
-    Pattern matches are stored as pending suggestions instead of being applied directly.
-    Returns {"imported": N, "skipped": N, "suggestions_created": N}.
+    Auto-detect CSV format and return a normalised DataFrame with columns:
+    date, amount, description — plus the institution name.
+    Supported formats: Wells Fargo, Redwood Credit Union.
     """
-    try:
+    # Peek at the first line to detect format
+    first_line = content.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
+
+    if first_line.startswith("Account ID,") or "Transaction ID," in first_line:
+        # ── Redwood Credit Union format ──
+        df = pd.read_csv(io.BytesIO(content))
+        # Amount field is like "-$61.95" or "$400.00" — strip quotes, $, and parse
+        df["amount"] = (
+            df["Amount"]
+            .astype(str)
+            .str.replace(r'["\$,]', "", regex=True)
+            .astype(float)
+        )
+        df["date"] = df["Date"]
+        df["description"] = df["Description"].fillna(df.get("Name", pd.Series(dtype=str))).fillna("")
+        df = df[["date", "amount", "description"]]
+        institution = "Redwood Credit Union"
+    else:
+        # ── Wells Fargo format (no header) ──
         df = pd.read_csv(
             io.BytesIO(content),
             header=None,
             names=["date", "amount", "star", "empty", "description"],
         )
+        df = df[["date", "amount", "description"]]
+        institution = "Wells Fargo"
+
+    return df, institution
+
+
+def import_csv_content(content: bytes, source_file: str, db: Session, account_id: int) -> dict:
+    """
+    Parse bank CSV bytes and insert new transactions into the database.
+    Auto-detects format (Wells Fargo, Redwood Credit Union).
+    Pattern matches are stored as pending suggestions instead of being applied directly.
+    Returns {"imported": N, "skipped": N, "suggestions_created": N}.
+    """
+    try:
+        df, institution = _detect_and_parse_csv(content)
     except Exception as e:
         raise ValueError(f"Could not parse CSV: {e}")
 
@@ -151,6 +184,7 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
             amount           = amount,
             source_file      = source_file,
             raw_data         = json.loads(row.to_json()),
+            institution      = institution,
         ))
         imported += 1
 

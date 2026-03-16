@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { VendorCombobox } from "@/components/vendor-combobox";
 import { CategoryCombobox } from "@/components/category-combobox";
 import { ProjectCombobox } from "@/components/project-combobox";
+import { InstitutionCombobox } from "@/components/institution-combobox";
 import { TagInput } from "@/components/tag-input";
 import { Transaction } from "@/types/transaction";
 import { useAccount } from "@/context/account-context";
@@ -28,6 +29,7 @@ export function BulkEditDialog({
   const [vendor,        setVendor]        = useState("");
   const [category,      setCategory]      = useState("");
   const [project,       setProject]       = useState("");
+  const [institution,   setInstitution]   = useState("");
   const [notes,         setNotes]         = useState("");
   const [tags,          setTags]          = useState<string[]>([]);
   const [taxDeductible, setTaxDeductible] = useState<boolean | null>(null);
@@ -36,7 +38,7 @@ export function BulkEditDialog({
   const { activeAccount } = useAccount();
 
   const reset = () => {
-    setVendor(""); setCategory(""); setProject(""); setNotes(""); setTags([]); setTaxDeductible(null); setIsTransfer(null);
+    setVendor(""); setCategory(""); setProject(""); setInstitution(""); setNotes(""); setTags([]); setTaxDeductible(null); setIsTransfer(null);
   };
 
   const handleSave = async () => {
@@ -47,6 +49,7 @@ export function BulkEditDialog({
       vendor:         tx.vendor,
       category:       tx.category,
       project:        tx.project,
+      institution:    tx.institution,
       notes:          tx.notes,
       tags:           tx.tags,
       tax_deductible: tx.tax_deductible,
@@ -59,6 +62,7 @@ export function BulkEditDialog({
       if (vendor)            updateData.vendor         = vendor;
       if (category)          updateData.category       = category;
       if (project)           updateData.project        = project;
+      if (institution)       updateData.institution    = institution;
       if (notes)             updateData.notes          = notes;
       if (tags.length > 0)   updateData.tags           = tags;
       if (taxDeductible !== null) updateData.tax_deductible = taxDeductible;
@@ -126,6 +130,11 @@ export function BulkEditDialog({
           <div className="grid gap-2">
             <Label>Project</Label>
             <ProjectCombobox value={project} onChange={setProject} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Institution</Label>
+            <InstitutionCombobox value={institution} onChange={setInstitution} />
           </div>
 
           <div className="grid gap-2">

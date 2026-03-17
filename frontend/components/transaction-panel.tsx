@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
+import { useAccount } from "@/context/account-context";
 import { Transaction } from "@/types/transaction";
 import { X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ interface TransactionPanelProps {
 }
 
 export function TransactionPanel({ transaction, open, onClose, onSave }: TransactionPanelProps) {
+  const { activeAccount } = useAccount();
   const [vendor,       setVendor]       = useState("");
   const [category,     setCategory]     = useState("");
   const [project,      setProject]      = useState("");
@@ -76,7 +78,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     if (!transaction) return;
     setLoading(true);
     try {
-      await api.put(`/transactions/${transaction.id}`, {
+      await api.put(`/transactions/${transaction.id}?account_id=${activeAccount!.id}`, {
         vendor:        vendor      || null,
         category:      category    || null,
         project:       project     || null,

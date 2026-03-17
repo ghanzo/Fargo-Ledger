@@ -154,6 +154,22 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
     skipped  = 0
     file_hash_counts: dict = defaultdict(int)
 
+    # Pre-load max occurrence per base_hash from DB to avoid cross-import collisions
+    existing_ids = [
+        row[0] for row in
+        db.query(Transaction.id).filter(Transaction.account_id == account_id).all()
+    ]
+    db_hash_counts: dict[str, int] = defaultdict(int)
+    for eid in existing_ids:
+        if "-" in eid:
+            base, occ_str = eid.rsplit("-", 1)
+            try:
+                occ = int(occ_str) + 1
+                if occ > db_hash_counts[base]:
+                    db_hash_counts[base] = occ
+            except ValueError:
+                pass
+
     # Accumulate suggestion groups: vendor_info_id → {vi, tx_ids, pattern}
     suggestions_map: dict[int, dict] = {}
 
@@ -167,7 +183,8 @@ def import_csv_content(content: bytes, source_file: str, db: Session, account_id
             continue
 
         base_hash  = generate_base_hash(str(t_date), desc, amount)
-        occurrence = file_hash_counts[base_hash]
+        # Start from DB max to avoid cross-import collisions
+        occurrence = db_hash_counts[base_hash] + file_hash_counts[base_hash]
         file_hash_counts[base_hash] += 1
         tx_id = f"{base_hash}-{occurrence}"
 

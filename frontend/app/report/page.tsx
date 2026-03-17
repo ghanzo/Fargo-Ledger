@@ -61,20 +61,31 @@ export default function ReportPage() {
   const [loading,          setLoading]          = useState(false);
   const [saving,           setSaving]           = useState(false);
   const [exporting,        setExporting]        = useState(false);
+  const [groupByCode,      setGroupByCode]      = usePersistentState<boolean>("report:groupByCode", false);
+  const [categoryMap,      setCategoryMap]       = useState<Record<string, { code: string; name: string; type: string }>>({});
 
   const dateFrom = `${year}-01-01`;
   const dateTo   = `${year}-12-31`;
 
-  // Fetch transactions when year or account changes
+  // Fetch transactions + category map when year or account changes
   useEffect(() => {
     if (!activeAccount) return;
     setLoading(true);
-    api
-      .get(`/transactions`, {
+    Promise.all([
+      api.get(`/transactions`, {
         params: { account_id: activeAccount.id, date_from: dateFrom, date_to: dateTo },
+      }),
+      api.get(`/category-map?account_id=${activeAccount.id}`),
+    ])
+      .then(([txRes, mapRes]) => {
+        setTransactions(txRes.data);
+        const lookup: Record<string, { code: string; name: string; type: string }> = {};
+        for (const m of mapRes.data) {
+          lookup[m.category] = { code: m.account_code, name: m.account_name, type: m.account_type };
+        }
+        setCategoryMap(lookup);
       })
-      .then((res) => setTransactions(res.data))
-      .catch(() => setTransactions([]))
+      .catch(() => { setTransactions([]); setCategoryMap({}); })
       .finally(() => setLoading(false));
   }, [activeAccount, dateFrom, dateTo]);
 
@@ -99,7 +110,9 @@ export default function ReportPage() {
       }
 
       const projKey = tx.project || "__none__";
-      const catKey  = tx.category || "Uncategorized";
+      const rawCat  = tx.category || "Uncategorized";
+      const mapping = groupByCode && tx.category ? categoryMap[tx.category] : null;
+      const catKey  = mapping ? `${mapping.code} - ${mapping.name}` : rawCat;
 
       if (amount > 0) {
         if (!projectIncomeMap.has(projKey))  projectIncomeMap.set(projKey, new Map());
@@ -180,7 +193,7 @@ export default function ReportPage() {
       txByProjectList,
       txByDate,
     };
-  }, [transactions]);
+  }, [transactions, groupByCode, categoryMap]);
 
   const beginBal  = parseFloat(beginningBalance.replace(/[^0-9.-]/g, "")) || 0;
   const endingBal = beginBal + netIncome + transfersIn - transfersOut;
@@ -548,6 +561,17 @@ export default function ReportPage() {
             onChange={(e) => setBeginningBalance(e.target.value)}
           />
         </div>
+
+        {/* Group by account code toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={groupByCode}
+            onChange={(e) => setGroupByCode(e.target.checked)}
+            className="h-4 w-4 rounded border-border cursor-pointer"
+          />
+          <span className="text-sm text-muted-foreground whitespace-nowrap">Group by Account Code</span>
+        </label>
 
         {loading && <span className="text-xs text-muted-foreground">Loading...</span>}
 

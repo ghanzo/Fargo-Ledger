@@ -13,7 +13,8 @@ class Account(Base):
     transactions = relationship("Transaction", back_populates="account", cascade="all, delete-orphan")
     budgets      = relationship("Budget",      back_populates="account", cascade="all, delete-orphan")
     vendor_infos = relationship("VendorInfo",   back_populates="account", cascade="all, delete-orphan")
-    properties   = relationship("Property",     back_populates="account", cascade="all, delete-orphan")
+    properties     = relationship("Property",     back_populates="account", cascade="all, delete-orphan")
+    category_maps  = relationship("CategoryMap",  back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name={self.name})>"
@@ -84,6 +85,15 @@ class VendorInfo(Base):
     email          = Column(String)
     rating         = Column(Integer)  # 1–5
     notes          = Column(String)
+    website             = Column(String)
+    address             = Column(String)
+    account_number      = Column(String)   # user's account with the vendor
+    contact_person      = Column(String)
+    payment_method      = Column(String)   # how user pays (auto-pay, check, card)
+    tax_id              = Column(String)   # EIN for 1099 filing
+    license_number      = Column(String)   # contractor license
+    insurance_info      = Column(String)   # insurance details/expiry
+    service_description = Column(String)   # what they do specifically
     rules          = Column(JSON)     # auto-assign rules: patterns, default_category/project, confidence, etc.
 
     account     = relationship("Account", back_populates="vendor_infos")
@@ -131,6 +141,22 @@ class ImportSuggestion(Base):
     transaction_ids    = Column(JSON)     # ["hash-0", "hash-1", ...]
     status             = Column(String, default='pending')  # pending/approved/dismissed
     created_at         = Column(DateTime, default=func.now())
+
+
+class CategoryMap(Base):
+    __tablename__ = 'category_map'
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    account_id    = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    category      = Column(String, nullable=False)
+    account_code  = Column(String, nullable=False)       # e.g. "5200"
+    account_name  = Column(String, nullable=False)       # e.g. "Meals & Entertainment"
+    account_type  = Column(String, nullable=False, default='expense')  # income, expense
+
+    account = relationship("Account", back_populates="category_maps")
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'category', name='category_map_account_cat_uq'),
+    )
 
 
 def generate_id(date_obj, description, amount):

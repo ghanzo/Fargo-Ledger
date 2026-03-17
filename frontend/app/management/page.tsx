@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Trash2, Plus, Download, RefreshCw, ChevronRight, ChevronDown, X, Search, Phone, Mail } from "lucide-react";
+import { Trash2, Plus, Download, RefreshCw, ChevronRight, ChevronDown, X, Search, Phone, Mail, Sparkles, Globe, MapPin, CreditCard, User, FileText, Shield, Hash, Wrench } from "lucide-react";
+import { toast } from "sonner";
 
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -29,16 +30,25 @@ interface VendorRules {
 }
 
 interface VendorInfo {
-  id:             number;
-  account_id:     number;
-  vendor_name:    string;
-  business_name:  string | null;
-  trade_category: string | null;
-  phone:          string | null;
-  email:          string | null;
-  rating:         number | null;
-  notes:          string | null;
-  rules:          VendorRules | null;
+  id:                  number;
+  account_id:          number;
+  vendor_name:         string;
+  business_name:       string | null;
+  trade_category:      string | null;
+  phone:               string | null;
+  email:               string | null;
+  rating:              number | null;
+  notes:               string | null;
+  rules:               VendorRules | null;
+  website:             string | null;
+  address:             string | null;
+  account_number:      string | null;
+  contact_person:      string | null;
+  payment_method:      string | null;
+  tax_id:              string | null;
+  license_number:      string | null;
+  insurance_info:      string | null;
+  service_description: string | null;
 }
 
 interface TenantData {
@@ -189,14 +199,19 @@ function VendorCard({
   updateRules,
   deleteVendor,
   resetConfidence,
+  enrichVendor,
+  clearEnrichment,
 }: {
   vendor: VendorInfo;
   updateVendor: (id: number, field: string, value: string | number | null) => void;
   updateRules: (vendor: VendorInfo, patch: Partial<VendorRules>) => void;
   deleteVendor: (id: number, name: string) => void;
   resetConfidence: (vendor: VendorInfo) => void;
+  enrichVendor: (id: number) => void;
+  clearEnrichment: (id: number, name: string) => void;
 }) {
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const v = vendor;
   const rules = v.rules;
 
@@ -219,6 +234,9 @@ function VendorCard({
             {rules && (
               <ConfidenceBadge confidence={rules.confidence} enabled={rules.enabled} />
             )}
+            <button className="p-1 text-muted-foreground hover:text-purple-500 transition-colors" onClick={() => enrichVendor(v.id)} title="Enrich with AI">
+              <Sparkles className="h-3.5 w-3.5" />
+            </button>
             <button className="p-1 text-muted-foreground hover:text-red-500 transition-colors" onClick={() => deleteVendor(v.id, v.vendor_name)}>
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -259,6 +277,72 @@ function VendorCard({
         <div className="text-xs">
           <EditCell value={v.notes} placeholder="Add notes" onSave={(val) => updateVendor(v.id, "notes", val)} />
         </div>
+
+        {/* Service description */}
+        {v.service_description && (
+          <div className="text-xs text-muted-foreground italic">{v.service_description}</div>
+        )}
+
+        {/* Collapsible Details Section */}
+        <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full pt-1 border-t">
+            {detailsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            <span className="font-medium">Details</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs">
+              <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
+              {v.website ? (
+                <a href={v.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">{v.website}</a>
+              ) : (
+                <EditCell value={v.website} placeholder="Add website" onSave={(val) => updateVendor(v.id, "website", val)} />
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.address} placeholder="Add address" onSave={(val) => updateVendor(v.id, "address", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <User className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.contact_person} placeholder="Contact person" onSave={(val) => updateVendor(v.id, "contact_person", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Hash className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.account_number} placeholder="Account number" onSave={(val) => updateVendor(v.id, "account_number", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <CreditCard className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.payment_method} placeholder="Payment method" onSave={(val) => updateVendor(v.id, "payment_method", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.tax_id} placeholder="Tax ID / EIN" onSave={(val) => updateVendor(v.id, "tax_id", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.license_number} placeholder="License number" onSave={(val) => updateVendor(v.id, "license_number", val)} />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
+              <EditCell value={v.insurance_info} placeholder="Insurance info" onSave={(val) => updateVendor(v.id, "insurance_info", val)} />
+            </div>
+            {!v.service_description && (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Wrench className="h-3 w-3 text-muted-foreground shrink-0" />
+                <EditCell value={v.service_description} placeholder="Service description" onSave={(val) => updateVendor(v.id, "service_description", val)} />
+              </div>
+            )}
+            {/* Clear & Re-enrich */}
+            {(v.business_name || v.trade_category || v.website || v.address || v.phone || v.service_description) && (
+              <button
+                className="text-xs text-muted-foreground hover:text-red-500 underline mt-1"
+                onClick={() => clearEnrichment(v.id, v.vendor_name)}
+              >
+                Clear AI data &amp; re-enrich
+              </button>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* Expandable Rules Section */}
         <Collapsible open={rulesOpen} onOpenChange={setRulesOpen}>
@@ -380,12 +464,14 @@ function VendorCard({
 
 function VendorsTab() {
   const { activeAccount } = useAccount();
-  const [vendors,    setVendors]    = useState<VendorInfo[]>([]);
-  const [importing,  setImporting]  = useState(false);
-  const [learning,   setLearning]   = useState(false);
-  const [addingNew,  setAddingNew]  = useState(false);
-  const [newName,    setNewName]    = useState("");
-  const [search,     setSearch]     = useState("");
+  const [vendors,      setVendors]      = useState<VendorInfo[]>([]);
+  const [importing,    setImporting]    = useState(false);
+  const [learning,     setLearning]     = useState(false);
+  const [researching,  setResearching]  = useState(false);
+  const [enriching,    setEnriching]    = useState(false);
+  const [addingNew,    setAddingNew]    = useState(false);
+  const [newName,      setNewName]      = useState("");
+  const [search,       setSearch]       = useState("");
 
   const fetchVendors = useCallback(async () => {
     if (!activeAccount) return;
@@ -419,8 +505,33 @@ function VendorsTab() {
     }
   };
 
+  const handleResearch = async () => {
+    if (!activeAccount) return;
+    setResearching(true);
+    try {
+      const res = await api.post(`/research/vendors?account_id=${activeAccount.id}`);
+      const d = res.data;
+      if (d.suggestions_created > 0) {
+        toast.success(`Research complete: ${d.suggestions_created} suggestion${d.suggestions_created !== 1 ? "s" : ""} created. Review on the Transactions page.`);
+      } else if (d.groups_found === 0) {
+        toast.info("No uncategorized transactions to research.");
+      } else {
+        toast.info(`Found ${d.groups_found} groups but no new suggestions (${d.skipped_existing} already pending, ${d.skipped_transfers} transfers skipped).`);
+      }
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 503) {
+        toast.error(detail || "Cannot connect to Ollama. Make sure it's running on your machine.");
+      } else {
+        toast.error(detail || "Research failed.");
+      }
+    } finally {
+      setResearching(false);
+    }
+  };
+
   const updateVendor = async (id: number, field: string, value: string | number | null) => {
-    await api.put(`/vendor-info/${id}`, { [field]: value || null });
+    await api.put(`/vendor-info/${id}?account_id=${activeAccount!.id}`, { [field]: value || null });
     await fetchVendors();
   };
 
@@ -430,7 +541,7 @@ function VendorsTab() {
       enabled: false, assigned_count: 0, corrected_count: 0, confidence: 1,
     };
     const newRules = { ...existing, ...patch };
-    await api.put(`/vendor-info/${vendor.id}`, { rules: newRules });
+    await api.put(`/vendor-info/${vendor.id}?account_id=${activeAccount!.id}`, { rules: newRules });
     await fetchVendors();
   };
 
@@ -447,7 +558,7 @@ function VendorsTab() {
 
   const deleteVendor = async (id: number, name: string) => {
     if (!window.confirm(`Delete vendor "${name}"?`)) return;
-    await api.delete(`/vendor-info/${id}`);
+    await api.delete(`/vendor-info/${id}?account_id=${activeAccount!.id}`);
     await fetchVendors();
   };
 
@@ -455,6 +566,55 @@ function VendorsTab() {
     if (!vendor.rules) return;
     if (!window.confirm(`Reset correction history for "${vendor.vendor_name}"? This will re-enable auto-assign.`)) return;
     await updateRules(vendor, { corrected_count: 0, confidence: 1.0, enabled: true });
+  };
+
+  const enrichVendor = async (id: number) => {
+    const toastId = toast.loading("Enriching vendor...");
+    try {
+      await api.post(`/vendor-info/${id}/enrich?account_id=${activeAccount!.id}`);
+      await fetchVendors();
+      toast.success("Vendor enriched with AI data.", { id: toastId });
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 503) {
+        toast.error(detail || "Cannot connect to LLM. Make sure it's running.", { id: toastId });
+      } else {
+        toast.error(detail || "Enrichment failed.", { id: toastId });
+      }
+    }
+  };
+
+  const clearEnrichment = async (id: number, name: string) => {
+    if (!window.confirm(`Clear AI-populated data for "${name}" and re-enrich?`)) return;
+    const toastId = toast.loading(`Re-enriching "${name}"...`);
+    try {
+      await api.post(`/vendor-info/${id}/clear-enrichment?account_id=${activeAccount!.id}`);
+      await api.post(`/vendor-info/${id}/enrich?account_id=${activeAccount!.id}`);
+      await fetchVendors();
+      toast.success(`Re-enriched "${name}".`, { id: toastId });
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      toast.error(detail || "Re-enrichment failed.", { id: toastId });
+    }
+  };
+
+  const handleEnrichAll = async () => {
+    if (!activeAccount) return;
+    setEnriching(true);
+    try {
+      const res = await api.post(`/vendor-info/enrich-all?account_id=${activeAccount.id}`);
+      await fetchVendors();
+      toast.success(`Enriched ${res.data.updated} of ${res.data.total} vendors.`);
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 503) {
+        toast.error(detail || "Cannot connect to LLM. Make sure it's running.");
+      } else {
+        toast.error(detail || "Enrich all failed.");
+      }
+    } finally {
+      setEnriching(false);
+    }
   };
 
   // Filter by search
@@ -522,6 +682,14 @@ function VendorsTab() {
           <RefreshCw className={`h-3.5 w-3.5 ${learning ? "animate-spin" : ""}`} />
           {learning ? "Learning..." : "Learn Rules"}
         </Button>
+        <Button size="sm" variant="outline" onClick={handleResearch} disabled={researching} className="gap-1.5 border-purple-500/30 text-purple-400 hover:bg-purple-500/10">
+          <Sparkles className={`h-3.5 w-3.5 ${researching ? "animate-pulse" : ""}`} />
+          {researching ? "Researching..." : "Research Vendors"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleEnrichAll} disabled={enriching} className="gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
+          <Sparkles className={`h-3.5 w-3.5 ${enriching ? "animate-pulse" : ""}`} />
+          {enriching ? "Enriching..." : "Enrich All"}
+        </Button>
         <span className="text-xs text-muted-foreground ml-auto">
           {filtered.length}{search ? ` of ${vendors.length}` : ""} vendors · {rulesCount} with rules
         </span>
@@ -563,6 +731,8 @@ function VendorsTab() {
                     updateRules={updateRules}
                     deleteVendor={deleteVendor}
                     resetConfidence={resetConfidence}
+                    enrichVendor={enrichVendor}
+                    clearEnrichment={clearEnrichment}
                   />
                 ))}
               </div>
@@ -613,13 +783,13 @@ function PropertiesTab() {
   };
 
   const updateProperty = async (pid: number, field: string, value: string) => {
-    await api.put(`/properties/${pid}`, { [field]: value || null });
+    await api.put(`/properties/${pid}?account_id=${activeAccount!.id}`, { [field]: value || null });
     await fetchProperties();
   };
 
   const deleteProperty = async (pid: number, name: string) => {
-    if (!window.confirm(`Delete property "${name}" and all its tenants?`)) return;
-    await api.delete(`/properties/${pid}`);
+    if (!window.confirm(`Delete project "${name}" and all its tenants?`)) return;
+    await api.delete(`/properties/${pid}?account_id=${activeAccount!.id}`);
     await fetchProperties();
   };
 
@@ -637,7 +807,7 @@ function PropertiesTab() {
   const createTenant = async (pid: number) => {
     const draft = addingTenant.get(pid);
     if (!draft?.name?.trim()) return;
-    await api.post(`/properties/${pid}/tenants`, {
+    await api.post(`/properties/${pid}/tenants?account_id=${activeAccount!.id}`, {
       name: draft.name, phone: draft.phone || null, email: draft.email || null,
       lease_start: draft.lease_start || null, lease_end: draft.lease_end || null,
       monthly_rent: draft.monthly_rent ?? null, notes: draft.notes || null,
@@ -647,13 +817,13 @@ function PropertiesTab() {
   };
 
   const updateTenant = async (tid: number, field: string, value: string | number | null) => {
-    await api.put(`/tenants/${tid}`, { [field]: value || null });
+    await api.put(`/tenants/${tid}?account_id=${activeAccount!.id}`, { [field]: value || null });
     await fetchProperties();
   };
 
   const deleteTenant = async (tid: number, name: string) => {
     if (!window.confirm(`Delete tenant "${name}"?`)) return;
-    await api.delete(`/tenants/${tid}`);
+    await api.delete(`/tenants/${tid}?account_id=${activeAccount!.id}`);
     await fetchProperties();
   };
 
@@ -663,9 +833,9 @@ function PropertiesTab() {
     <div>
       <div className="flex items-center gap-3 mb-4">
         <Button size="sm" variant="outline" onClick={() => setAddingProperty(true)} className="gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> Add Property
+          <Plus className="h-3.5 w-3.5" /> Add Project
         </Button>
-        <span className="text-xs text-muted-foreground ml-auto">{properties.length} properties · Click any cell to edit</span>
+        <span className="text-xs text-muted-foreground ml-auto">{properties.length} projects · Click any cell to edit</span>
       </div>
 
       {addingProperty && (
@@ -776,9 +946,235 @@ function PropertiesTab() {
         })}
         {properties.length === 0 && (
           <div className="text-center py-12 text-muted-foreground text-sm border rounded">
-            No properties yet. Click "Add Property" to get started.
+            No projects yet. Click "Add Project" to get started.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Chart of Accounts Tab ────────────────────────────────────────────────────
+
+interface CategoryMapping {
+  id: number;
+  account_id: number;
+  category: string;
+  account_code: string;
+  account_name: string;
+  account_type: string;
+}
+
+function ChartOfAccountsTab() {
+  const { activeAccount } = useAccount();
+  const [mappings, setMappings] = useState<CategoryMapping[]>([]);
+  const [unmapped, setUnmapped] = useState<string[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({ category: "", account_code: "", account_name: "", account_type: "expense" });
+
+  const fetchData = useCallback(async () => {
+    if (!activeAccount) return;
+    const [mapRes, unmapRes] = await Promise.all([
+      api.get(`/category-map?account_id=${activeAccount.id}`),
+      api.get(`/category-map/unmapped?account_id=${activeAccount.id}`),
+    ]);
+    setMappings(mapRes.data);
+    setUnmapped(unmapRes.data);
+  }, [activeAccount]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const createMapping = async () => {
+    if (!activeAccount || !draft.category.trim() || !draft.account_code.trim() || !draft.account_name.trim()) return;
+    try {
+      await api.post(`/category-map?account_id=${activeAccount.id}`, {
+        category: draft.category.trim(),
+        account_code: draft.account_code.trim(),
+        account_name: draft.account_name.trim(),
+        account_type: draft.account_type,
+      });
+      setDraft({ category: "", account_code: "", account_name: "", account_type: "expense" });
+      setAdding(false);
+      await fetchData();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail ?? "Error creating mapping");
+    }
+  };
+
+  const updateMapping = async (id: number, field: string, value: string) => {
+    await api.put(`/category-map/${id}?account_id=${activeAccount!.id}`, { [field]: value });
+    await fetchData();
+  };
+
+  const deleteMapping = async (id: number, category: string) => {
+    if (!window.confirm(`Remove mapping for "${category}"?`)) return;
+    await api.delete(`/category-map/${id}?account_id=${activeAccount!.id}`);
+    await fetchData();
+  };
+
+  const quickMap = (category: string) => {
+    setDraft({ category, account_code: "", account_name: "", account_type: "expense" });
+    setAdding(true);
+  };
+
+  // Group mappings by account_code
+  const grouped = useMemo(() => {
+    const groups = new Map<string, CategoryMapping[]>();
+    for (const m of mappings) {
+      const key = `${m.account_code} - ${m.account_name}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(m);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [mappings]);
+
+  const inputCls = "h-7 text-xs px-1";
+
+  return (
+    <div>
+      {/* Unmapped categories banner */}
+      {unmapped.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3">
+          <div className="text-xs font-semibold text-amber-600 mb-2">
+            {unmapped.length} unmapped categor{unmapped.length === 1 ? "y" : "ies"} — click to assign an account code
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {unmapped.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => quickMap(cat)}
+                className="px-2 py-1 rounded text-xs bg-amber-500/20 text-amber-700 hover:bg-amber-500/30 transition-colors"
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-3 mb-4">
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)} className="gap-1.5">
+          <Plus className="h-3.5 w-3.5" /> Add Mapping
+        </Button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {mappings.length} mapped · {unmapped.length} unmapped
+        </span>
+      </div>
+
+      {/* Add mapping inline */}
+      {adding && (
+        <div className="flex items-center gap-2 mb-4 p-3 bg-muted rounded border flex-wrap">
+          <Input
+            autoFocus
+            placeholder="Category *"
+            className={`${inputCls} w-40`}
+            value={draft.category}
+            onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
+          />
+          <Input
+            placeholder="Code (e.g. 5200) *"
+            className={`${inputCls} w-32`}
+            value={draft.account_code}
+            onChange={(e) => setDraft((d) => ({ ...d, account_code: e.target.value }))}
+          />
+          <Input
+            placeholder="Account Name (e.g. Meals & Entertainment) *"
+            className={`${inputCls} w-64`}
+            value={draft.account_name}
+            onChange={(e) => setDraft((d) => ({ ...d, account_name: e.target.value }))}
+          />
+          <select
+            className="h-7 text-xs px-1 rounded border border-border bg-background"
+            value={draft.account_type}
+            onChange={(e) => setDraft((d) => ({ ...d, account_type: e.target.value }))}
+          >
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+          <Button size="sm" onClick={createMapping} disabled={!draft.category.trim() || !draft.account_code.trim() || !draft.account_name.trim()}>
+            Add
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setDraft({ category: "", account_code: "", account_name: "", account_type: "expense" }); }}>
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {/* Mappings table grouped by account code */}
+      <div className="border rounded overflow-hidden">
+        <table className="w-full text-xs border-collapse">
+          <thead className="bg-muted border-b">
+            <tr>
+              <th className="text-left px-3 py-2 font-medium text-muted-foreground w-[100px]">Code</th>
+              <th className="text-left px-3 py-2 font-medium text-muted-foreground w-[220px]">Account Name</th>
+              <th className="text-left px-3 py-2 font-medium text-muted-foreground w-[80px]">Type</th>
+              <th className="text-left px-3 py-2 font-medium text-muted-foreground">Category</th>
+              <th className="w-8" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {grouped.map(([groupLabel, items]) => (
+              <React.Fragment key={groupLabel}>
+                {items.map((m, i) => (
+                  <tr key={m.id} className="hover:bg-muted/50">
+                    <td className="px-3 py-2">
+                      {i === 0 ? (
+                        <EditCell
+                          value={m.account_code}
+                          onSave={(val) => {
+                            items.forEach((item) => updateMapping(item.id, "account_code", val));
+                          }}
+                          className="font-mono font-semibold"
+                        />
+                      ) : (
+                        <span className="text-muted-foreground font-mono">{m.account_code}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {i === 0 ? (
+                        <EditCell
+                          value={m.account_name}
+                          onSave={(val) => {
+                            items.forEach((item) => updateMapping(item.id, "account_name", val));
+                          }}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground">{m.account_name}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
+                        m.account_type === "income"
+                          ? "bg-emerald-500/15 text-emerald-400"
+                          : "bg-red-500/15 text-red-400"
+                      }`}>
+                        {m.account_type}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/25 text-xs">
+                        {m.category}
+                      </span>
+                    </td>
+                    <td className="px-1">
+                      <button className="p-1 text-muted-foreground hover:text-red-500" onClick={() => deleteMapping(m.id, m.category)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+            {mappings.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  No account code mappings yet. Click "Add Mapping" or map categories from the banner above.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -787,7 +1183,7 @@ function PropertiesTab() {
 // ── Management Page ───────────────────────────────────────────────────────────
 
 export default function ManagementPage() {
-  const [tab, setTab] = useState<"vendors" | "properties">("vendors");
+  const [tab, setTab] = useState<"vendors" | "properties" | "chart">("vendors");
 
   const tabCls = (t: string) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -799,18 +1195,20 @@ export default function ManagementPage() {
   return (
     <div className="min-h-screen bg-muted">
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <h1 className="text-2xl font-bold text-foreground mb-1">Management Info</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-1">Management</h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Manage vendors, properties, and tenants. Use{" "}
-          <span className="font-medium text-foreground">Learn from History</span> to build auto-categorization rules from past transactions.
+          Manage vendors, properties, and chart of accounts.
         </p>
 
         <div className="flex border-b mb-6">
           <button className={tabCls("vendors")} onClick={() => setTab("vendors")}>Vendors</button>
-          <button className={tabCls("properties")} onClick={() => setTab("properties")}>Tenants &amp; Properties</button>
+          <button className={tabCls("properties")} onClick={() => setTab("properties")}>Projects &amp; Tenants</button>
+          <button className={tabCls("chart")} onClick={() => setTab("chart")}>Chart of Accounts</button>
         </div>
 
-        {tab === "vendors" ? <VendorsTab /> : <PropertiesTab />}
+        {tab === "vendors" && <VendorsTab />}
+        {tab === "properties" && <PropertiesTab />}
+        {tab === "chart" && <ChartOfAccountsTab />}
       </div>
     </div>
   );

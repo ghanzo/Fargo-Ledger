@@ -1,6 +1,6 @@
 # System Architecture — Fargo Ledger
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-16
 
 This document describes how the system works today. It is the map of the codebase — modules, data flow, APIs, schema, and key algorithms.
 
@@ -31,13 +31,13 @@ PostgreSQL 15  (localhost:5432)
 
 | File | LOC (approx) | Purpose |
 |------|-------------|---------|
-| `src/api.py` | ~1,080 | All REST endpoints (42 routes across 9 resource groups) |
-| `src/models.py` | ~120 | SQLAlchemy ORM models (7 tables) with relationships |
-| `src/schemas.py` | ~200 | Pydantic request/response schemas |
-| `src/importer.py` | ~210 | CSV parsing, pattern extraction, vendor matching, deduplication |
+| `src/api.py` | ~1,100 | All REST endpoints (42+ routes across 9 resource groups) |
+| `src/models.py` | ~140 | SQLAlchemy ORM models (7 tables) with relationships |
+| `src/schemas.py` | ~210 | Pydantic request/response schemas |
+| `src/importer.py` | ~245 | CSV parsing, format auto-detection, pattern extraction, vendor matching, deduplication |
 | `src/watcher.py` | ~200 | Folder watcher for auto-importing CSVs from inbox |
 | `src/database.py` | ~16 | SQLAlchemy engine and session setup |
-| `src/ingest.py` | ~120 | CLI script for manual CSV import |
+| `src/ingest.py` | ~120 | CLI script for manual CSV import (legacy) |
 
 ### Key Patterns
 
@@ -52,18 +52,26 @@ PostgreSQL 15  (localhost:5432)
 - `< 0.70`: rule auto-disables
 - Corrections tracked when user manually changes an auto-categorized vendor
 
-**Sign-aware Rules:** Vendor rules can store separate category/project for income (+) vs expense (-) transactions.
+**Sign-aware Rules:** Vendor rules can store separate category/project for income (+) vs expense (-) transactions via `by_sign` in the rules JSON.
 
-**Import Pipeline:**
+**Multi-Format Import Pipeline:**
 ```
 CSV file
+  -> importer.py:_detect_and_parse_csv()
+  -> Detect format from first line:
+     - "Account ID," header → Redwood Credit Union
+       - Parse "$-61.95" amounts, MM/DD/YY dates
+       - institution = "Redwood Credit Union"
+     - No header → Wells Fargo
+       - 5-column format (date, amount, star, empty, description)
+       - institution = "Wells Fargo"
+  -> Normalize to (date, amount, description) DataFrame
   -> importer.py:import_csv_content()
-  -> Parse rows (Wells Fargo 5-column format)
   -> Generate hash ID: SHA256(date+description+amount) + occurrence suffix
   -> Deduplicate against existing transactions
-  -> Match against vendor rules (pattern matching)
-  -> High confidence: auto-assign fields
-  -> Unmatched patterns: create import_suggestions (pending)
+  -> Store institution on each transaction
+  -> Match against vendor rules (pattern matching, confidence thresholds)
+  -> Create import_suggestions for high-confidence matches (pending)
   -> Return {imported, skipped, suggestions_created}
 ```
 
@@ -89,31 +97,32 @@ watcher.py starts on app lifespan
 |------|---------|
 | **Pages** | |
 | `app/page.tsx` | Main transactions page — fetches all, renders DataTable |
-| `app/analysis/page.tsx` | Charts, budget tracker, category/vendor/project breakdowns |
-| `app/report/page.tsx` | Annual P&L by property, reconciliation, Excel/PDF export |
+| `app/analysis/page.tsx` | Charts, budget tracker, category/vendor/project breakdowns with in-place editing |
+| `app/report/page.tsx` | Annual P&L by project, reconciliation, Excel/PDF export |
 | `app/management/page.tsx` | Vendor card grid with rules, property/tenant CRUD |
 | `app/error.tsx` | Error boundary — catches rendering errors, shows retry UI |
 | `app/layout.tsx` | Root layout with ThemeProvider + AccountProvider |
 | `app/nav.tsx` | NavBar with active-link underline, account selector, watcher indicator, theme toggle |
+| `app/columns.tsx` | TanStack Table column definitions (select, date, vendor, project, institution, description, category, amount, notes, tags, tax, actions) |
+| `app/data-table.tsx` | Virtualized table with filters, shift-click, keyboard shortcuts, CSV export |
 | **Components** | |
-| `components/transaction-panel.tsx` | Slide-in detail/edit panel with auto-suggest |
-| `components/bulk-edit-dialog.tsx` | Bulk edit modal with undo (sonner toast action) |
-| `components/import-dialog.tsx` | Drag-and-drop CSV import |
+| `components/transaction-panel.tsx` | Slide-in detail/edit panel with auto-suggest, institution field |
+| `components/bulk-edit-dialog.tsx` | Bulk edit modal with undo (sonner toast action), institution support |
+| `components/import-dialog.tsx` | Drag-and-drop CSV import (Wells Fargo + Redwood CU) |
 | `components/budget-dialog.tsx` | Budget CRUD manager |
 | `components/suggestion-banner.tsx` | Import suggestion review (approve/edit/dismiss/approve-all) |
 | `components/account-manager-dialog.tsx` | Create/rename/delete accounts |
 | `components/vendor-combobox.tsx` | Free-form vendor selection/creation |
 | `components/category-combobox.tsx` | Free-form category selection/creation |
 | `components/project-combobox.tsx` | Free-form project selection/creation |
+| `components/institution-combobox.tsx` | Free-form institution selection/creation |
 | `components/tag-input.tsx` | Chip badge input for tags |
 | **Infrastructure** | |
-| `lib/api.ts` | Centralized axios instance (baseURL from `NEXT_PUBLIC_API_URL`) + `withAccount()` helper |
+| `lib/api.ts` | Centralized axios instance (baseURL from `NEXT_PUBLIC_API_URL`) |
 | `lib/utils.ts` | Tailwind `cn()` utility |
 | `context/account-context.tsx` | AccountProvider + `useAccount()` hook |
 | `hooks/use-persistent-state.ts` | sessionStorage-backed useState |
 | `types/transaction.ts` | Transaction TypeScript interface |
-| `app/columns.tsx` | TanStack Table column definitions |
-| `app/data-table.tsx` | Table with filters, shift-click, keyboard shortcuts, CSV export |
 
 ### Key Patterns
 
@@ -124,10 +133,11 @@ layout.tsx
   -> AccountProvider (context)
     -> NavBar
     -> Page routes
-      -> Transactions: SuggestionBanner + DataTable
+      -> Transactions: SuggestionBanner + DataTable (virtualized)
          -> BulkEditDialog
          -> TransactionPanel (with comboboxes)
-      -> Analysis: Recharts charts + BudgetDialog
+      -> Analysis: Charts + BudgetDialog + editable TransactionTables
+         -> Built-in BulkEditDialog per drill-down
       -> Report: Aggregations + PDF/Excel export
       -> Management: Vendor cards + Property/tenant CRUD
 ```
@@ -135,21 +145,32 @@ layout.tsx
 **State Management:** React Context for accounts only. Props for everything else. No Redux/Zustand — intentionally simple.
 
 **Persistence:**
-- `sessionStorage` via `usePersistentState()` — filters, expanded sections (survives page navigation, clears on tab close)
+- `sessionStorage` via `usePersistentState()` — filters, expanded sections, active tab (survives page navigation, clears on tab close)
 - `localStorage` — active account ID (survives sessions)
 
 **TanStack Table:** Callbacks (`onRefresh`, `openPanel`) passed via `meta` option in `useReactTable`. Column components access them via `table.options.meta`.
 
-**Undo Pattern:** Before a bulk edit, snapshots of all affected transactions are captured. On success, a sonner toast with an "Undo" action calls `POST /transactions/bulk-restore` with the snapshots.
+**Virtualized Scrolling:** `@tanstack/react-virtual` renders only ~40-50 rows in the DOM regardless of total count. Top/bottom spacer `<tr>` elements maintain scroll height. `overscan: 15` for smooth scrolling. Dynamic row measurement via `virtualizer.measureElement`.
 
-**FilterPill:** Three-state cycle: `null` -> `true` -> `false` -> `null`. Used for boolean filters (has vendor, has category, etc).
+**Undo Pattern:** Before a bulk edit, snapshots of all affected transactions are captured (including institution). On success, a sonner toast with an "Undo" action calls `POST /transactions/bulk-restore` with the snapshots.
+
+**FilterPill:** Three-state cycle: `null` -> `true` -> `false` -> `null`. Used for boolean filters (has vendor, has category, has institution, etc).
 
 **Keyboard Shortcuts (DataTable):**
-- `j`/`k` — move cursor up/down
+- `j`/`k` or `↑`/`↓` — move cursor up/down
 - `Space` — toggle selection on focused row
 - `e` — open edit panel for focused row
 - `Esc` — close panel / deselect
 - `Ctrl+A` — select all visible rows
+
+**Analysis Transaction Editing:**
+- Transactions shown in analysis drill-downs have full editing capabilities
+- Checkboxes with shift-click range selection
+- Search bar filtering within the drill-down
+- Sort by date or amount (click header to cycle asc/desc/none)
+- Actions menu (Edit Details, Copy ID) per row
+- Floating bulk edit bar when rows selected
+- On save/bulk-edit, analysis data refreshes to reflect changes
 
 ---
 
@@ -163,7 +184,8 @@ accounts
   +-- transactions (FK account_id, CASCADE)
   |     |-- id (PK, SHA256 hash + occurrence suffix)
   |     |-- transaction_date, description, amount
-  |     |-- category, vendor, project, notes, tags (JSON)
+  |     |-- category, vendor, project, institution
+  |     |-- notes, tags (JSON)
   |     |-- tax_deductible, is_transfer, is_cleaned, auto_categorized
   |     |-- created_at, updated_at (audit timestamps)
   |     |-- source_file, raw_data (JSON)
@@ -198,6 +220,17 @@ accounts
 
 **7 tables, all account-scoped, all with cascade deletes.**
 
+### Key Fields
+
+| Field | Purpose |
+|-------|---------|
+| `transaction.institution` | Bank/source that originated the transaction (auto-set on import, editable) |
+| `transaction.is_transfer` | Excludes from P&L in reports and analysis |
+| `transaction.is_cleaned` | Indicates transaction has been reviewed/categorized |
+| `transaction.auto_categorized` | Set when vendor rules auto-assigned fields on import |
+| `transaction.raw_data` | Original CSV row as JSON, preserved for audit and format re-detection |
+| `vendor_info.rules` | JSON blob with patterns, defaults, by_sign, confidence, enabled, assigned_count, corrected_count |
+
 ---
 
 ## API Endpoint Inventory
@@ -213,37 +246,37 @@ accounts
 ### Transactions (5 endpoints)
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/transactions?account_id=X` | List with filters |
-| PUT | `/transactions/{id}` | Update single transaction |
+| GET | `/transactions?account_id=X` | List with filters (category, vendor, project, has_category, has_vendor, has_project, date range, cleaned, search, limit) |
+| PUT | `/transactions/{id}` | Update single transaction (category, vendor, project, institution, notes, tags, tax_deductible, is_transfer, is_cleaned) |
 | PATCH | `/transactions/bulk?account_id=X` | Bulk update |
-| POST | `/transactions/bulk-restore` | Undo bulk operations |
-| GET | `/transactions/{id}/suggest` | Auto-suggest vendor/category |
+| POST | `/transactions/bulk-restore` | Undo bulk operations (restores all fields including institution) |
+| GET | `/transactions/{id}/suggest` | Auto-suggest vendor/category from similar descriptions |
 
 ### Facets & Import (3 endpoints)
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/facets?account_id=X` | Distinct categories, vendors, projects |
-| POST | `/import/csv` | Import Wells Fargo CSV |
-| GET | `/watcher/status` | Import watcher running state |
+| GET | `/facets?account_id=X` | Distinct categories, vendors, projects, institutions |
+| POST | `/import/csv` | Import CSV (auto-detects Wells Fargo or Redwood CU format) |
+| GET | `/watcher/status` | Import watcher running state + recent log |
 
 ### Suggestions (4 endpoints)
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/suggestions?account_id=X` | List pending suggestions |
-| POST | `/suggestions/{id}/approve` | Apply suggestion |
+| GET | `/suggestions?account_id=X` | List pending suggestions with sample descriptions |
+| POST | `/suggestions/{id}/approve` | Apply suggestion to matched transactions |
 | POST | `/suggestions/{id}/dismiss` | Dismiss suggestion |
-| POST | `/suggestions/approve-all?account_id=X` | Batch approve all |
+| POST | `/suggestions/approve-all?account_id=X` | Batch approve all pending |
 
 ### Stats (7 endpoints)
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/stats/summary` | Income/expenses/net totals |
-| GET | `/stats/category_breakdown` | Spending by category |
-| GET | `/stats/project_breakdown` | Income/expenses by project |
+| GET | `/stats/summary` | Income/expenses/net/tax_deductible/uncategorized totals |
+| GET | `/stats/category_breakdown` | Spending by category (includes uncategorized), filterable by project |
+| GET | `/stats/project_breakdown` | Income/expenses/count by project |
 | GET | `/stats/monthly` | Monthly income vs expenses |
-| GET | `/stats/top_vendors` | Top vendors by spend |
-| GET | `/stats/subscriptions` | Recurring vendor detection |
-| GET | `/stats/budget_status` | Budget vs actual for month |
+| GET | `/stats/top_vendors` | Top vendors by spend volume |
+| GET | `/stats/subscriptions` | Recurring vendor detection (30% tolerance) |
+| GET | `/stats/budget_status` | Budget vs actual for current month |
 
 ### Budgets (4 endpoints)
 | Method | Endpoint | Purpose |
@@ -260,8 +293,8 @@ accounts
 | POST | `/vendor-info?account_id=X` | Create vendor |
 | PUT | `/vendor-info/{id}` | Update vendor metadata/rules |
 | DELETE | `/vendor-info/{id}` | Delete vendor |
-| POST | `/vendor-info/rebuild-rules?account_id=X` | Learn rules from history |
-| POST | `/vendor-info/import-from-transactions?account_id=X` | Create vendors from transaction data |
+| POST | `/vendor-info/rebuild-rules?account_id=X` | Re-learn rules from transaction history |
+| POST | `/vendor-info/import-from-transactions?account_id=X` | Create vendors from existing transaction data |
 
 ### Properties & Tenants (7 endpoints)
 | Method | Endpoint | Purpose |
@@ -274,7 +307,29 @@ accounts
 | PUT | `/tenants/{id}` | Update tenant |
 | DELETE | `/tenants/{id}` | Delete tenant |
 
-**42 endpoints total across 9 resource groups.**
+**42+ endpoints total across 9 resource groups.**
+
+---
+
+## Report Structure
+
+The report page (`/report`) generates annual financial reports per account.
+
+### Sections
+1. **Summary Table** — all projects with income/expenses/net columns
+2. **Income Statements** — per-project detail: income categories, expense categories, net income
+3. **Reconciliation** — beginning balance + net income + transfers in - transfers out = ending balance
+4. **Transactions by Project** — every transaction grouped by project with subtotals
+5. **All Transactions by Date** — chronological check register with project, vendor, category, institution, running balance
+
+### Excel Export (4 sheets)
+1. **Income Statement** — project-level P&L with SUM formulas
+2. **Reconciliation** — 5-line summary with formula for ending balance
+3. **Check Register** — all transactions with Date, Project, Description, Vendor, Category, Institution, Amount, Balance (running balance formula per row)
+4. **Management** — vendors grouped by trade category, properties with tenant details
+
+### PDF Export
+Canvas-based rendering via html-to-image + jsPDF with smart page breaks.
 
 ---
 
@@ -294,4 +349,11 @@ accounts
 ### Dependencies
 **Backend:** FastAPI ~0.115, SQLAlchemy ~2.0, psycopg2-binary ~2.9, pandas ~2.2, uvicorn ~0.34, pydantic ~2.10, python-multipart ~0.0.20, watchdog ~6.0
 
-**Frontend:** Next.js 16, React 19, TanStack Table 8, axios, Recharts 3, ExcelJS 4, jsPDF 4, sonner 2, shadcn/ui, Tailwind CSS 4
+**Frontend:** Next.js 16, React 19, TanStack Table 8, TanStack Virtual, axios, Recharts 3, ExcelJS 4, jsPDF 4, sonner 2, shadcn/ui, Tailwind CSS 4
+
+### Adding New Database Columns
+SQLAlchemy's `create_all` does NOT add columns to existing tables. When a new column is added to `src/models.py`, run manually:
+```bash
+docker exec finance-db-1 psql -U user -d finance_db -c \
+  "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS <col> <type> DEFAULT <default>;"
+```

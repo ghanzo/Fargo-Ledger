@@ -119,34 +119,61 @@ class SuggestionApproveBody(BaseModel):
 # ── VendorInfo schemas ──────────────────────────────────────────────────────
 
 class VendorInfoCreate(BaseModel):
-    vendor_name:    str
-    business_name:  Optional[str] = None
-    trade_category: Optional[str] = None
-    phone:          Optional[str] = None
-    email:          Optional[str] = None
-    rating:         Optional[int] = None
-    notes:          Optional[str] = None
+    vendor_name:         str
+    business_name:       Optional[str] = None
+    trade_category:      Optional[str] = None
+    phone:               Optional[str] = None
+    email:               Optional[str] = None
+    rating:              Optional[int] = None
+    notes:               Optional[str] = None
+    website:             Optional[str] = None
+    address:             Optional[str] = None
+    account_number:      Optional[str] = None
+    contact_person:      Optional[str] = None
+    payment_method:      Optional[str] = None
+    tax_id:              Optional[str] = None
+    license_number:      Optional[str] = None
+    insurance_info:      Optional[str] = None
+    service_description: Optional[str] = None
 
 class VendorInfoUpdate(BaseModel):
-    business_name:  Optional[str]  = None
-    trade_category: Optional[str]  = None
-    phone:          Optional[str]  = None
-    email:          Optional[str]  = None
-    rating:         Optional[int]  = None
-    notes:          Optional[str]  = None
-    rules:          Optional[Any]  = None  # full rules dict replacement
+    business_name:       Optional[str]  = None
+    trade_category:      Optional[str]  = None
+    phone:               Optional[str]  = None
+    email:               Optional[str]  = None
+    rating:              Optional[int]  = None
+    notes:               Optional[str]  = None
+    rules:               Optional[Any]  = None  # full rules dict replacement
+    website:             Optional[str]  = None
+    address:             Optional[str]  = None
+    account_number:      Optional[str]  = None
+    contact_person:      Optional[str]  = None
+    payment_method:      Optional[str]  = None
+    tax_id:              Optional[str]  = None
+    license_number:      Optional[str]  = None
+    insurance_info:      Optional[str]  = None
+    service_description: Optional[str]  = None
 
 class VendorInfoResponse(BaseModel):
-    id:             int
-    account_id:     int
-    vendor_name:    str
-    business_name:  Optional[str] = None
-    trade_category: Optional[str] = None
-    phone:          Optional[str] = None
-    email:          Optional[str] = None
-    rating:         Optional[int] = None
-    notes:          Optional[str] = None
-    rules:          Optional[Any] = None
+    id:                  int
+    account_id:          int
+    vendor_name:         str
+    business_name:       Optional[str] = None
+    trade_category:      Optional[str] = None
+    phone:               Optional[str] = None
+    email:               Optional[str] = None
+    rating:              Optional[int] = None
+    notes:               Optional[str] = None
+    rules:               Optional[Any] = None
+    website:             Optional[str] = None
+    address:             Optional[str] = None
+    account_number:      Optional[str] = None
+    contact_person:      Optional[str] = None
+    payment_method:      Optional[str] = None
+    tax_id:              Optional[str] = None
+    license_number:      Optional[str] = None
+    insurance_info:      Optional[str] = None
+    service_description: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -203,6 +230,30 @@ class PropertyResponse(BaseModel):
     address:      Optional[str] = None
     notes:        Optional[str] = None
     tenants:      List[TenantResponse] = []
+
+    class Config:
+        from_attributes = True
+
+# ── Category Map (Chart of Accounts) schemas ──────────────────────────────
+
+class CategoryMapCreate(BaseModel):
+    category:     str
+    account_code: str
+    account_name: str
+    account_type: str = "expense"
+
+class CategoryMapUpdate(BaseModel):
+    account_code: Optional[str] = None
+    account_name: Optional[str] = None
+    account_type: Optional[str] = None
+
+class CategoryMapResponse(BaseModel):
+    id:           int
+    account_id:   int
+    category:     str
+    account_code: str
+    account_name: str
+    account_type: str
 
     class Config:
         from_attributes = True

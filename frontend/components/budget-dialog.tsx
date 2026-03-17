@@ -63,7 +63,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
     const num = parseFloat(newLimit);
     if (isNaN(num) || num <= 0) return;
     try {
-      await api.put(`/budgets/${id}`, { monthly_limit: num });
+      await api.put(`/budgets/${id}?account_id=${activeAccount!.id}`, { monthly_limit: num });
       await fetchBudgets();
       onSaved?.();
     } catch {
@@ -73,7 +73,7 @@ export function BudgetDialog({ open, onOpenChange, onSaved }: BudgetDialogProps)
 
   const handleDelete = async (id: number) => {
     try {
-      await api.delete(`/budgets/${id}`);
+      await api.delete(`/budgets/${id}?account_id=${activeAccount!.id}`);
       await fetchBudgets();
       onSaved?.();
     } catch {

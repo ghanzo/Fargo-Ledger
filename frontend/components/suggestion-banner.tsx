@@ -63,7 +63,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
   const handleApprove = async (s: Suggestion) => {
     setLoading(s.id);
     try {
-      await api.post(`/suggestions/${s.id}/approve`);
+      await api.post(`/suggestions/${s.id}/approve?account_id=${accountId}`);
       toast.success(`Applied "${s.suggested_vendor}" to ${s.transaction_count} transactions`);
       await fetchSuggestions();
       onApplied();
@@ -81,7 +81,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
       if (editValues.vendor) body.vendor = editValues.vendor;
       if (editValues.category) body.category = editValues.category;
       if (editValues.project) body.project = editValues.project;
-      await api.post(`/suggestions/${s.id}/approve`, body);
+      await api.post(`/suggestions/${s.id}/approve?account_id=${accountId}`, body);
       toast.success(`Applied edited values to ${s.transaction_count} transactions`);
       setEditingId(null);
       await fetchSuggestions();
@@ -96,7 +96,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
   const handleDismiss = async (s: Suggestion) => {
     setLoading(s.id);
     try {
-      await api.post(`/suggestions/${s.id}/dismiss`);
+      await api.post(`/suggestions/${s.id}/dismiss?account_id=${accountId}`);
       await fetchSuggestions();
     } catch {
       toast.error("Failed to dismiss suggestion");

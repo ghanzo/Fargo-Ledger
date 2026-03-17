@@ -11,7 +11,7 @@ from datetime import date
 from collections import defaultdict, Counter
 
 from src.database import SessionLocal, engine
-from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant, ImportSuggestion
+from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant, ImportSuggestion, CategoryMap
 from src.schemas import (
     TransactionResponse, TransactionUpdate, TransactionBulkUpdate, TransactionRestore,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetStatus,
@@ -20,9 +20,10 @@ from src.schemas import (
     PropertyCreate, PropertyUpdate, PropertyResponse,
     TenantCreate, TenantUpdate, TenantResponse,
     ImportSuggestionResponse, SuggestionApproveBody,
+    CategoryMapCreate, CategoryMapUpdate, CategoryMapResponse,
 )
 from src.importer import import_csv_content, extract_description_patterns, _CONFIDENCE_ASSIGN_THRESHOLD
-from src import watcher
+from src import watcher, researcher
 
 logging.basicConfig(level=logging.INFO)
 
@@ -189,8 +190,8 @@ def get_transactions(
 
 
 @app.put("/transactions/{tx_id}", response_model=TransactionResponse)
-def update_transaction(tx_id: str, update_data: TransactionUpdate, db: Session = Depends(get_db)):
-    tx = db.query(Transaction).filter(Transaction.id == tx_id).first()
+def update_transaction(tx_id: str, update_data: TransactionUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    tx = db.query(Transaction).filter(Transaction.id == tx_id, Transaction.account_id == account_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
@@ -347,9 +348,10 @@ def list_suggestions(account_id: int = Query(...), db: Session = Depends(get_db)
 def approve_suggestion(
     suggestion_id: int,
     body: SuggestionApproveBody = None,
+    account_id: int = Query(...),
     db: Session = Depends(get_db),
 ):
-    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id).first()
+    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id, ImportSuggestion.account_id == account_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     if s.status != "pending":
@@ -388,8 +390,8 @@ def approve_suggestion(
 
 
 @app.post("/suggestions/{suggestion_id}/dismiss")
-def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
-    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id).first()
+def dismiss_suggestion(suggestion_id: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    s = db.query(ImportSuggestion).filter(ImportSuggestion.id == suggestion_id, ImportSuggestion.account_id == account_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     if s.status != "pending":
@@ -703,8 +705,8 @@ def create_budget(
 
 
 @app.put("/budgets/{budget_id}", response_model=BudgetResponse)
-def update_budget(budget_id: int, payload: BudgetUpdate, db: Session = Depends(get_db)):
-    budget = db.query(Budget).filter(Budget.id == budget_id).first()
+def update_budget(budget_id: int, payload: BudgetUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    budget = db.query(Budget).filter(Budget.id == budget_id, Budget.account_id == account_id).first()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
     budget.monthly_limit = payload.monthly_limit
@@ -714,8 +716,8 @@ def update_budget(budget_id: int, payload: BudgetUpdate, db: Session = Depends(g
 
 
 @app.delete("/budgets/{budget_id}")
-def delete_budget(budget_id: int, db: Session = Depends(get_db)):
-    budget = db.query(Budget).filter(Budget.id == budget_id).first()
+def delete_budget(budget_id: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    budget = db.query(Budget).filter(Budget.id == budget_id, Budget.account_id == account_id).first()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
     db.delete(budget)
@@ -809,8 +811,8 @@ def create_vendor_info(payload: VendorInfoCreate, account_id: int = Query(...), 
 
 
 @app.put("/vendor-info/{vid}", response_model=VendorInfoResponse)
-def update_vendor_info(vid: int, payload: VendorInfoUpdate, db: Session = Depends(get_db)):
-    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid).first()
+def update_vendor_info(vid: int, payload: VendorInfoUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid, VendorInfo.account_id == account_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -821,13 +823,116 @@ def update_vendor_info(vid: int, payload: VendorInfoUpdate, db: Session = Depend
 
 
 @app.delete("/vendor-info/{vid}")
-def delete_vendor_info(vid: int, db: Session = Depends(get_db)):
-    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid).first()
+def delete_vendor_info(vid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid, VendorInfo.account_id == account_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     db.delete(vendor)
     db.commit()
     return {"message": "Vendor deleted"}
+
+
+@app.post("/vendor-info/enrich-all")
+async def enrich_all_vendors(account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Enrich all vendors that have empty fields using LLM lookup."""
+    vendors = db.query(VendorInfo).filter(VendorInfo.account_id == account_id).all()
+    enrichable_fields = [
+        "business_name", "trade_category", "website", "address",
+        "phone", "service_description",
+    ]
+    updated_count = 0
+    for vendor in vendors:
+        # Only enrich if at least one enrichable field is empty
+        empty_fields = [f for f in enrichable_fields if not getattr(vendor, f)]
+        if not empty_fields:
+            continue
+        # Gather context for LLM
+        txs = (
+            db.query(Transaction.description, Transaction.category)
+            .filter(Transaction.vendor == vendor.vendor_name, Transaction.account_id == account_id)
+            .limit(20)
+            .all()
+        )
+        samples = list({t.description for t in txs})[:5] if txs else None
+        categories = list({t.category for t in txs if t.category})
+        tx_count = db.query(func.count(Transaction.id)).filter(
+            Transaction.vendor == vendor.vendor_name, Transaction.account_id == account_id
+        ).scalar()
+        context = {
+            "trade_category": vendor.trade_category,
+            "categories_used": categories[:5],
+            "transaction_count": tx_count,
+        }
+        try:
+            result = await researcher.enrich_vendor(vendor.vendor_name, sample_descriptions=samples, context=context)
+        except (ConnectionError, ValueError) as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        if not result:
+            continue
+        changed = False
+        for field in enrichable_fields:
+            if not getattr(vendor, field) and result.get(field):
+                setattr(vendor, field, result[field])
+                changed = True
+        if changed:
+            updated_count += 1
+    db.commit()
+    return {"updated": updated_count, "total": len(vendors)}
+
+
+@app.post("/vendor-info/{vid}/clear-enrichment", response_model=VendorInfoResponse)
+def clear_vendor_enrichment(vid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Clear all LLM-populated fields on a vendor card so it can be re-enriched."""
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid, VendorInfo.account_id == account_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    for field in ("business_name", "trade_category", "website", "address", "phone",
+                  "service_description"):
+        setattr(vendor, field, None)
+    db.commit()
+    db.refresh(vendor)
+    return vendor
+
+
+@app.post("/vendor-info/{vid}/enrich", response_model=VendorInfoResponse)
+async def enrich_vendor_info(vid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Enrich a single vendor card using LLM lookup. Only fills NULL fields."""
+    vendor = db.query(VendorInfo).filter(VendorInfo.id == vid, VendorInfo.account_id == account_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    # Gather context for LLM
+    txs = (
+        db.query(Transaction.description, Transaction.category)
+        .filter(Transaction.vendor == vendor.vendor_name, Transaction.account_id == vendor.account_id)
+        .limit(20)
+        .all()
+    )
+    samples = list({t.description for t in txs})[:5] if txs else None
+    categories = list({t.category for t in txs if t.category})
+    tx_count = db.query(func.count(Transaction.id)).filter(
+        Transaction.vendor == vendor.vendor_name, Transaction.account_id == vendor.account_id
+    ).scalar()
+    context = {
+        "trade_category": vendor.trade_category,
+        "categories_used": categories[:5],
+        "transaction_count": tx_count,
+    }
+    try:
+        result = await researcher.enrich_vendor(vendor.vendor_name, sample_descriptions=samples, context=context)
+    except (ConnectionError, ValueError) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=422, detail="LLM returned no usable data")
+    enrichable_fields = [
+        "business_name", "trade_category", "website", "address",
+        "phone", "service_description",
+    ]
+    for field in enrichable_fields:
+        if not getattr(vendor, field) and result.get(field):
+            setattr(vendor, field, result[field])
+    db.commit()
+    db.refresh(vendor)
+    return vendor
 
 
 @app.post("/vendor-info/rebuild-rules")
@@ -1020,8 +1125,8 @@ def create_property(payload: PropertyCreate, account_id: int = Query(...), db: S
 
 
 @app.put("/properties/{pid}", response_model=PropertyResponse)
-def update_property(pid: int, payload: PropertyUpdate, db: Session = Depends(get_db)):
-    prop = db.query(Property).filter(Property.id == pid).first()
+def update_property(pid: int, payload: PropertyUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid, Property.account_id == account_id).first()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -1050,8 +1155,8 @@ def update_property(pid: int, payload: PropertyUpdate, db: Session = Depends(get
 
 
 @app.delete("/properties/{pid}")
-def delete_property(pid: int, db: Session = Depends(get_db)):
-    prop = db.query(Property).filter(Property.id == pid).first()
+def delete_property(pid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid, Property.account_id == account_id).first()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
     db.delete(prop)
@@ -1062,8 +1167,8 @@ def delete_property(pid: int, db: Session = Depends(get_db)):
 # ── Tenants ──────────────────────────────────────────────────────────────────
 
 @app.post("/properties/{pid}/tenants", response_model=TenantResponse)
-def create_tenant(pid: int, payload: TenantCreate, db: Session = Depends(get_db)):
-    prop = db.query(Property).filter(Property.id == pid).first()
+def create_tenant(pid: int, payload: TenantCreate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == pid, Property.account_id == account_id).first()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
     tenant = Tenant(property_id=pid, **payload.model_dump())
@@ -1074,8 +1179,13 @@ def create_tenant(pid: int, payload: TenantCreate, db: Session = Depends(get_db)
 
 
 @app.put("/tenants/{tid}", response_model=TenantResponse)
-def update_tenant(tid: int, payload: TenantUpdate, db: Session = Depends(get_db)):
-    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+def update_tenant(tid: int, payload: TenantUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    tenant = (
+        db.query(Tenant)
+        .join(Property, Tenant.property_id == Property.id)
+        .filter(Tenant.id == tid, Property.account_id == account_id)
+        .first()
+    )
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -1086,10 +1196,189 @@ def update_tenant(tid: int, payload: TenantUpdate, db: Session = Depends(get_db)
 
 
 @app.delete("/tenants/{tid}")
-def delete_tenant(tid: int, db: Session = Depends(get_db)):
-    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+def delete_tenant(tid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    tenant = (
+        db.query(Tenant)
+        .join(Property, Tenant.property_id == Property.id)
+        .filter(Tenant.id == tid, Property.account_id == account_id)
+        .first()
+    )
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     db.delete(tenant)
     db.commit()
     return {"message": "Tenant deleted"}
+
+
+# ── Chart of Accounts (Category Map) ────────────────────────────────────
+
+@app.get("/category-map", response_model=List[CategoryMapResponse])
+def list_category_maps(account_id: int = Query(...), db: Session = Depends(get_db)):
+    return (
+        db.query(CategoryMap)
+        .filter(CategoryMap.account_id == account_id)
+        .order_by(CategoryMap.account_code)
+        .all()
+    )
+
+
+@app.post("/category-map", response_model=CategoryMapResponse)
+def create_category_map(
+    payload: CategoryMapCreate,
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    existing = (
+        db.query(CategoryMap)
+        .filter(CategoryMap.account_id == account_id, CategoryMap.category == payload.category)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Category '{payload.category}' is already mapped")
+    m = CategoryMap(account_id=account_id, **payload.model_dump())
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return m
+
+
+@app.put("/category-map/{map_id}", response_model=CategoryMapResponse)
+def update_category_map(map_id: int, payload: CategoryMapUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    m = db.query(CategoryMap).filter(CategoryMap.id == map_id, CategoryMap.account_id == account_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    for field, val in payload.model_dump(exclude_unset=True).items():
+        if val is not None:
+            setattr(m, field, val)
+    db.commit()
+    db.refresh(m)
+    return m
+
+
+@app.delete("/category-map/{map_id}")
+def delete_category_map(map_id: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    m = db.query(CategoryMap).filter(CategoryMap.id == map_id, CategoryMap.account_id == account_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    db.delete(m)
+    db.commit()
+    return {"message": "Mapping deleted"}
+
+
+@app.get("/category-map/unmapped")
+def get_unmapped_categories(account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Return category strings that exist on transactions but have no mapping."""
+    all_cats = (
+        db.query(Transaction.category)
+        .distinct()
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .all()
+    )
+    mapped_cats = (
+        db.query(CategoryMap.category)
+        .filter(CategoryMap.account_id == account_id)
+        .all()
+    )
+    mapped_set = {c[0] for c in mapped_cats}
+    unmapped = sorted([c[0] for c in all_cats if c[0] and c[0] not in mapped_set])
+    return unmapped
+
+
+# ── Vendor Research (LLM) ────────────────────────────────────────────────
+
+@app.post("/research/vendors")
+async def research_vendors(
+    account_id: int = Query(...),
+    provider: str = Query(default=researcher.LLM_PROVIDER),
+    db: Session = Depends(get_db),
+):
+    """
+    Scan uncategorized transactions, group by description pattern,
+    send representative descriptions to an LLM, and create suggestions.
+    Only the bank description text is sent — never amounts, dates, or personal info.
+    """
+    # 1. Find transactions with no vendor assigned
+    uncategorized = (
+        db.query(Transaction)
+        .filter(
+            Transaction.account_id == account_id,
+            Transaction.vendor == None,
+            Transaction.is_transfer == False,
+        )
+        .all()
+    )
+
+    if not uncategorized:
+        return {"groups_found": 0, "skipped_transfers": 0, "skipped_existing": 0, "suggestions_created": 0, "errors": 0}
+
+    # 2. Group by extracted description pattern
+    groups: dict[str, dict] = {}  # pattern → {desc, tx_ids}
+    skipped_transfers = 0
+
+    for tx in uncategorized:
+        desc = tx.description.strip()
+        if researcher.is_skippable(desc):
+            skipped_transfers += 1
+            continue
+
+        patterns = extract_description_patterns(desc)
+        key = patterns[0] if patterns else desc[:30].upper()
+
+        if key not in groups:
+            groups[key] = {"desc": desc, "tx_ids": []}
+        groups[key]["tx_ids"].append(tx.id)
+
+    # 3. Skip groups that already have pending suggestions
+    existing_patterns = {
+        s.pattern_matched
+        for s in db.query(ImportSuggestion.pattern_matched)
+        .filter(ImportSuggestion.account_id == account_id, ImportSuggestion.status == "pending")
+        .all()
+        if s.pattern_matched
+    }
+    skipped_existing = 0
+    to_research: dict[str, dict] = {}
+    for key, group in groups.items():
+        if key in existing_patterns:
+            skipped_existing += 1
+        else:
+            to_research[key] = group
+
+    # 4. Send to LLM
+    descriptions = [g["desc"] for g in to_research.values()]
+    try:
+        llm_results = await researcher.research_descriptions(descriptions, provider=provider)
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    # 5. Create ImportSuggestion rows
+    suggestions_created = 0
+    errors = 0
+    for key, group in to_research.items():
+        result = llm_results.get(group["desc"])
+        if not result:
+            errors += 1
+            continue
+
+        db.add(ImportSuggestion(
+            account_id=account_id,
+            vendor_info_id=None,
+            suggested_vendor=result.get("vendor_name"),
+            suggested_category=result.get("category"),
+            suggested_project=None,
+            pattern_matched=key,
+            transaction_ids=group["tx_ids"],
+            status="pending",
+        ))
+        suggestions_created += 1
+
+    if suggestions_created:
+        db.commit()
+
+    return {
+        "groups_found": len(groups),
+        "skipped_transfers": skipped_transfers,
+        "skipped_existing": skipped_existing,
+        "suggestions_created": suggestions_created,
+        "errors": errors,
+    }

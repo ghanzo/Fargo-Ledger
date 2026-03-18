@@ -10,11 +10,13 @@ class Account(Base):
     id   = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
 
-    transactions = relationship("Transaction", back_populates="account", cascade="all, delete-orphan")
-    budgets      = relationship("Budget",      back_populates="account", cascade="all, delete-orphan")
-    vendor_infos = relationship("VendorInfo",   back_populates="account", cascade="all, delete-orphan")
+    transactions   = relationship("Transaction",  back_populates="account", cascade="all, delete-orphan")
+    budgets        = relationship("Budget",       back_populates="account", cascade="all, delete-orphan")
+    vendor_infos   = relationship("VendorInfo",   back_populates="account", cascade="all, delete-orphan")
     properties     = relationship("Property",     back_populates="account", cascade="all, delete-orphan")
     category_maps  = relationship("CategoryMap",  back_populates="account", cascade="all, delete-orphan")
+    category_infos = relationship("CategoryInfo", back_populates="account", cascade="all, delete-orphan")
+    project_infos  = relationship("ProjectInfo",  back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name={self.name})>"
@@ -79,6 +81,7 @@ class VendorInfo(Base):
     id             = Column(Integer, primary_key=True, autoincrement=True)
     account_id     = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
     vendor_name    = Column(String, nullable=False)
+    confirmed      = Column(Boolean, default=True, nullable=False)  # False = LLM-created, awaiting user approval
     business_name  = Column(String)
     trade_category = Column(String)
     phone          = Column(String)
@@ -157,6 +160,30 @@ class CategoryMap(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'category', name='category_map_account_cat_uq'),
     )
+
+
+class CategoryInfo(Base):
+    __tablename__ = 'category_info'
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    account_id  = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    name        = Column(String, nullable=False)
+    description = Column(String)
+
+    account = relationship("Account", back_populates="category_infos")
+
+    __table_args__ = (UniqueConstraint('account_id', 'name', name='category_info_account_name_uq'),)
+
+
+class ProjectInfo(Base):
+    __tablename__ = 'project_info'
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    account_id  = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    name        = Column(String, nullable=False)
+    description = Column(String)
+
+    account = relationship("Account", back_populates="project_infos")
+
+    __table_args__ = (UniqueConstraint('account_id', 'name', name='project_info_account_name_uq'),)
 
 
 def generate_id(date_obj, description, amount):

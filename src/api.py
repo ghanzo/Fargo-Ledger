@@ -11,7 +11,7 @@ from datetime import date
 from collections import defaultdict, Counter
 
 from src.database import SessionLocal, engine
-from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant, ImportSuggestion, CategoryMap
+from src.models import Base, Transaction, Budget, Account, VendorInfo, Property, Tenant, ImportSuggestion, CategoryMap, CategoryInfo, ProjectInfo
 from src.schemas import (
     TransactionResponse, TransactionUpdate, TransactionBulkUpdate, TransactionRestore,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetStatus,
@@ -21,8 +21,10 @@ from src.schemas import (
     TenantCreate, TenantUpdate, TenantResponse,
     ImportSuggestionResponse, SuggestionApproveBody,
     CategoryMapCreate, CategoryMapUpdate, CategoryMapResponse,
+    CategoryInfoCreate, CategoryInfoUpdate, CategoryInfoResponse,
+    ProjectInfoCreate, ProjectInfoUpdate, ProjectInfoResponse,
 )
-from src.importer import import_csv_content, extract_description_patterns, _CONFIDENCE_ASSIGN_THRESHOLD
+from src.importer import import_csv_content, extract_description_patterns, find_matching_vendor, _CONFIDENCE_ASSIGN_THRESHOLD
 from src import watcher, researcher
 
 logging.basicConfig(level=logging.INFO)
@@ -317,16 +319,29 @@ def list_suggestions(account_id: int = Query(...), db: Session = Depends(get_db)
         .all()
     )
     result = []
+    # Batch-fetch all sample transactions to avoid N+1
+    all_sample_ids = []
     for s in rows:
         tx_ids = s.transaction_ids or []
-        samples = []
-        if tx_ids:
-            sample_txs = (
-                db.query(Transaction.description)
-                .filter(Transaction.id.in_(tx_ids[:5]))
-                .all()
-            )
-            samples = [t.description for t in sample_txs]
+        all_sample_ids.extend(tx_ids[:5])
+    tx_map = {}
+    if all_sample_ids:
+        sample_txs = db.query(Transaction).filter(Transaction.id.in_(all_sample_ids)).all()
+        tx_map = {t.id: t for t in sample_txs}
+
+    for s in rows:
+        tx_ids = s.transaction_ids or []
+        sample_descs = []
+        sample_txns = []
+        for tid in tx_ids[:5]:
+            tx = tx_map.get(tid)
+            if tx:
+                sample_descs.append(tx.description)
+                sample_txns.append({
+                    "description": tx.description,
+                    "amount": float(tx.amount),
+                    "date": str(tx.transaction_date),
+                })
         result.append(ImportSuggestionResponse(
             id=s.id,
             account_id=s.account_id,
@@ -337,7 +352,8 @@ def list_suggestions(account_id: int = Query(...), db: Session = Depends(get_db)
             pattern_matched=s.pattern_matched,
             transaction_ids=tx_ids,
             transaction_count=len(tx_ids),
-            sample_descriptions=samples,
+            sample_descriptions=sample_descs,
+            sample_transactions=sample_txns,
             status=s.status,
             created_at=s.created_at,
         ))
@@ -376,12 +392,31 @@ def approve_suggestion(
             update_data, synchronize_session=False
         )
 
-    # Increment assigned_count on the vendor
+    # Confirm and update the linked vendor card
     if s.vendor_info_id:
         vi = db.query(VendorInfo).filter(VendorInfo.id == s.vendor_info_id).first()
-        if vi and vi.rules:
-            rules = dict(vi.rules)
+        if vi:
+            # If user edited the vendor name, update the card
+            if body and body.vendor and body.vendor != vi.vendor_name:
+                # Check no duplicate confirmed card with that name
+                existing = (
+                    db.query(VendorInfo)
+                    .filter(VendorInfo.account_id == s.account_id, VendorInfo.vendor_name == body.vendor, VendorInfo.id != vi.id)
+                    .first()
+                )
+                if not existing:
+                    vi.vendor_name = body.vendor
+
+            # Confirm the card (was unconfirmed if LLM-created)
+            vi.confirmed = True
+
+            # Update rules with approved category/project
+            rules = dict(vi.rules) if vi.rules else {}
             rules["assigned_count"] = rules.get("assigned_count", 0) + len(tx_ids)
+            if category:
+                rules["default_category"] = category
+            if project:
+                rules["default_project"] = project
             vi.rules = rules
 
     s.status = "approved"
@@ -396,6 +431,22 @@ def dismiss_suggestion(suggestion_id: int, account_id: int = Query(...), db: Ses
         raise HTTPException(status_code=404, detail="Suggestion not found")
     if s.status != "pending":
         raise HTTPException(status_code=400, detail="Suggestion already processed")
+
+    # Clean up unconfirmed vendor card if no other suggestions reference it
+    if s.vendor_info_id:
+        vi = db.query(VendorInfo).filter(VendorInfo.id == s.vendor_info_id).first()
+        if vi and not vi.confirmed:
+            other_refs = (
+                db.query(ImportSuggestion)
+                .filter(
+                    ImportSuggestion.vendor_info_id == vi.id,
+                    ImportSuggestion.id != s.id,
+                )
+                .count()
+            )
+            if other_refs == 0:
+                db.delete(vi)
+
     s.status = "dismissed"
     db.commit()
     return {"message": "Suggestion dismissed"}
@@ -428,9 +479,14 @@ def approve_all_suggestions(account_id: int = Query(...), db: Session = Depends(
 
         if s.vendor_info_id:
             vi = db.query(VendorInfo).filter(VendorInfo.id == s.vendor_info_id).first()
-            if vi and vi.rules:
-                rules = dict(vi.rules)
+            if vi:
+                vi.confirmed = True
+                rules = dict(vi.rules) if vi.rules else {}
                 rules["assigned_count"] = rules.get("assigned_count", 0) + len(tx_ids)
+                if s.suggested_category:
+                    rules["default_category"] = s.suggested_category
+                if s.suggested_project:
+                    rules["default_project"] = s.suggested_project
                 vi.rules = rules
 
         s.status = "approved"
@@ -442,8 +498,8 @@ def approve_all_suggestions(account_id: int = Query(...), db: Session = Depends(
 # ── Suggest ────────────────────────────────────────────────────────────────
 
 @app.get("/transactions/{tx_id}/suggest")
-def suggest_categorization(tx_id: str, db: Session = Depends(get_db)):
-    tx = db.query(Transaction).filter(Transaction.id == tx_id).first()
+def suggest_categorization(tx_id: str, account_id: int = Query(...), db: Session = Depends(get_db)):
+    tx = db.query(Transaction).filter(Transaction.id == tx_id, Transaction.account_id == account_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
@@ -454,6 +510,7 @@ def suggest_categorization(tx_id: str, db: Session = Depends(get_db)):
     prefix = (tx.description or "")[:_PREFIX_LEN]
     similar = db.query(Transaction).filter(
         Transaction.id != tx_id,
+        Transaction.account_id == account_id,
         Transaction.description.ilike(f"%{prefix}%"),
         Transaction.vendor != None,
     ).limit(_MAX_SIMILAR).all()
@@ -656,6 +713,16 @@ def get_subscriptions(
 
 
 # ── Bulk restore (undo) ─────────────────────────────────────────────────────
+
+@app.post("/transactions/by-ids")
+def get_transactions_by_ids(ids: List[str], account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Fetch transactions by a list of IDs. Returns date, amount, description."""
+    txs = db.query(Transaction).filter(Transaction.id.in_(ids), Transaction.account_id == account_id).order_by(Transaction.transaction_date.desc()).all()
+    return [
+        {"description": tx.description, "amount": float(tx.amount), "date": str(tx.transaction_date)}
+        for tx in txs
+    ]
+
 
 @app.post("/transactions/bulk-restore")
 def bulk_restore_transactions(snapshots: List[TransactionRestore], db: Session = Depends(get_db)):
@@ -1284,20 +1351,109 @@ def get_unmapped_categories(account_id: int = Query(...), db: Session = Depends(
     return unmapped
 
 
+# ── Research helpers ──────────────────────────────────────────────────────
+
+def _build_correspondence_history(db: Session, account_id: int) -> list[dict]:
+    """Build ranked correspondence history from approved suggestions and user edits."""
+    correspondence: list[dict] = []
+    seen_descs: set[str] = set()
+
+    # 1. Approved suggestions (strongest signal)
+    approved = (
+        db.query(ImportSuggestion)
+        .filter(
+            ImportSuggestion.account_id == account_id,
+            ImportSuggestion.status == "approved",
+            ImportSuggestion.suggested_vendor != None,
+        )
+        .order_by(ImportSuggestion.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    for s in approved:
+        desc = s.pattern_matched
+        if desc in seen_descs:
+            continue
+        seen_descs.add(desc)
+        correspondence.append({
+            "desc": researcher.scrub_description(desc),
+            "vendor": s.suggested_vendor,
+            "category": s.suggested_category or "?",
+            "project": s.suggested_project,
+            "source": "approved",
+        })
+
+    # 2. User-edited transactions (manual categorization)
+    user_edited = (
+        db.query(Transaction.description, Transaction.vendor, Transaction.category, Transaction.project)
+        .filter(
+            Transaction.account_id == account_id,
+            Transaction.vendor != None,
+            Transaction.category != None,
+            Transaction.is_cleaned == True,
+            Transaction.auto_categorized == False,
+        )
+        .order_by(Transaction.updated_at.desc())
+        .limit(20)
+        .all()
+    )
+    for t in user_edited:
+        scrubbed = researcher.scrub_description(t.description)
+        if scrubbed in seen_descs:
+            continue
+        seen_descs.add(scrubbed)
+        correspondence.append({
+            "desc": scrubbed,
+            "vendor": t.vendor,
+            "category": t.category,
+            "project": t.project,
+            "source": "user-edited",
+        })
+
+    # 3. Rule-matched auto-categorized (bulk patterns)
+    if len(correspondence) < 40:
+        remaining = 40 - len(correspondence)
+        rule_matched = (
+            db.query(Transaction.description, Transaction.vendor, Transaction.category, Transaction.project)
+            .filter(
+                Transaction.account_id == account_id,
+                Transaction.vendor != None,
+                Transaction.category != None,
+                Transaction.auto_categorized == True,
+            )
+            .order_by(Transaction.updated_at.desc())
+            .limit(remaining)
+            .all()
+        )
+        for t in rule_matched:
+            scrubbed = researcher.scrub_description(t.description)
+            if scrubbed in seen_descs:
+                continue
+            seen_descs.add(scrubbed)
+            correspondence.append({
+                "desc": scrubbed,
+                "vendor": t.vendor,
+                "category": t.category,
+                "project": t.project,
+                "source": "rule-matched",
+            })
+
+    return correspondence
+
+
 # ── Vendor Research (LLM) ────────────────────────────────────────────────
 
 @app.post("/research/vendors")
 async def research_vendors(
     account_id: int = Query(...),
-    provider: str = Query(default=researcher.LLM_PROVIDER),
     db: Session = Depends(get_db),
 ):
     """
-    Scan uncategorized transactions, group by description pattern,
-    send representative descriptions to an LLM, and create suggestions.
-    Only the bank description text is sent — never amounts, dates, or personal info.
+    LLM-powered research for unvendored transactions.
+    All unvendored transactions are sent to Grok for classification.
+    Only bank description text is sent to LLM — never amounts, dates, or personal info.
     """
-    # 1. Find transactions with no vendor assigned
+    # ── Find transactions with no vendor assigned ────────────────────────────
     uncategorized = (
         db.query(Transaction)
         .filter(
@@ -1309,10 +1465,13 @@ async def research_vendors(
     )
 
     if not uncategorized:
-        return {"groups_found": 0, "skipped_transfers": 0, "skipped_existing": 0, "suggestions_created": 0, "errors": 0}
+        return {
+            "groups_found": 0, "skipped_transfers": 0,
+            "skipped_existing": 0, "suggestions_created": 0, "cards_created": 0, "errors": 0,
+        }
 
-    # 2. Group by extracted description pattern
-    groups: dict[str, dict] = {}  # pattern → {desc, tx_ids}
+    # ── Deduplicate by exact description for LLM research ────────────────────
+    groups: dict[str, dict] = {}
     skipped_transfers = 0
 
     for tx in uncategorized:
@@ -1321,18 +1480,21 @@ async def research_vendors(
             skipped_transfers += 1
             continue
 
-        patterns = extract_description_patterns(desc)
-        key = patterns[0] if patterns else desc[:30].upper()
+        # Group by exact description — no pattern collapsing
+        key = desc
 
         if key not in groups:
             groups[key] = {"desc": desc, "tx_ids": []}
         groups[key]["tx_ids"].append(tx.id)
 
-    # 3. Skip groups that already have pending suggestions
+    # Skip descriptions that already have pending suggestions
     existing_patterns = {
         s.pattern_matched
         for s in db.query(ImportSuggestion.pattern_matched)
-        .filter(ImportSuggestion.account_id == account_id, ImportSuggestion.status == "pending")
+        .filter(
+            ImportSuggestion.account_id == account_id,
+            ImportSuggestion.status == "pending",
+        )
         .all()
         if s.pattern_matched
     }
@@ -1344,28 +1506,238 @@ async def research_vendors(
         else:
             to_research[key] = group
 
-    # 4. Send to LLM
+    if not to_research:
+        return {
+            "groups_found": len(groups),
+            "skipped_transfers": skipped_transfers, "skipped_existing": skipped_existing,
+            "suggestions_created": 0, "cards_created": 0, "errors": 0,
+        }
+
+    # Gather context for constrained LLM research
+    # Only send confirmed vendors — unconfirmed ones haven't been vetted by user
+    all_vendors_for_account = (
+        db.query(VendorInfo)
+        .filter(VendorInfo.account_id == account_id)
+        .all()
+    )
+    vendor_context = []
+    vendor_name_to_vi: dict[str, VendorInfo] = {}
+    for vi in all_vendors_for_account:
+        vendor_name_to_vi[vi.vendor_name.upper()] = vi
+        if not vi.confirmed:
+            continue  # exclude unconfirmed from LLM context
+        rules = vi.rules or {}
+        vendor_context.append({
+            "name": vi.vendor_name,
+            "category": rules.get("default_category") or vi.trade_category,
+            "patterns": rules.get("patterns", []),
+        })
+
+    # Distinct categories from transactions
+    cat_rows = (
+        db.query(Transaction.category)
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .distinct()
+        .all()
+    )
+    category_list = sorted([r[0] for r in cat_rows])
+
+    # Distinct projects
+    proj_rows = (
+        db.query(Transaction.project)
+        .filter(Transaction.account_id == account_id, Transaction.project != None)
+        .distinct()
+        .all()
+    )
+    project_list = sorted([r[0] for r in proj_rows])
+
+    correspondence = _build_correspondence_history(db, account_id)
+
+    # Send to LLM (constrained batch via Grok)
     descriptions = [g["desc"] for g in to_research.values()]
     try:
-        llm_results = await researcher.research_descriptions(descriptions, provider=provider)
-    except ConnectionError as e:
+        llm_results = await researcher.research_descriptions_constrained(
+            descriptions, vendor_context, category_list, project_list, correspondence,
+        )
+    except (ConnectionError, ValueError) as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    # 5. Create ImportSuggestion rows
+    # ── Phase 3: Create suggestions + vendor cards from LLM results ──────────
     suggestions_created = 0
+    cards_created = 0
     errors = 0
+
     for key, group in to_research.items():
         result = llm_results.get(group["desc"])
         if not result:
             errors += 1
             continue
 
+        vendor_name = result.get("vendor_name")
+        category = result.get("category")
+        trade_category = result.get("trade_category")
+        project = result.get("project")
+        is_new_vendor = result.get("is_new_vendor", True)
+
+        linked_vi_id = None
+
+        if vendor_name:
+            existing_vi = vendor_name_to_vi.get(vendor_name.upper())
+            if existing_vi and not is_new_vendor:
+                # LLM matched an existing vendor — link to it
+                linked_vi_id = existing_vi.id
+            elif not existing_vi:
+                # Genuinely new vendor — create card
+                new_vi = VendorInfo(
+                    account_id=account_id,
+                    vendor_name=vendor_name,
+                    confirmed=False,  # awaits user approval
+                    trade_category=trade_category,
+                    rules={
+                        "patterns": [key],
+                        "default_category": category,
+                        "default_project": project,
+                        "enabled": True,
+                        "assigned_count": 0,
+                        "corrected_count": 0,
+                        "confidence": 1.0,
+                    },
+                )
+                db.add(new_vi)
+                db.flush()  # get new_vi.id
+                linked_vi_id = new_vi.id
+                vendor_name_to_vi[vendor_name.upper()] = new_vi
+                cards_created += 1
+
+        # Create suggestion for user review
         db.add(ImportSuggestion(
             account_id=account_id,
-            vendor_info_id=None,
-            suggested_vendor=result.get("vendor_name"),
-            suggested_category=result.get("category"),
-            suggested_project=None,
+            vendor_info_id=linked_vi_id,
+            suggested_vendor=vendor_name,
+            suggested_category=category,
+            suggested_project=project,
+            pattern_matched=key,
+            transaction_ids=group["tx_ids"],
+            status="pending",
+        ))
+        suggestions_created += 1
+
+    if suggestions_created or cards_created:
+        db.commit()
+
+    return {
+        "groups_found": len(groups),
+        "skipped_transfers": skipped_transfers,
+        "skipped_existing": skipped_existing,
+        "suggestions_created": suggestions_created,
+        "cards_created": cards_created,
+        "errors": errors,
+    }
+
+
+# ── Category Research (LLM) ──────────────────────────────────────────────
+
+@app.post("/research/categories")
+async def research_categories(
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Research categories for transactions that have a vendor but no category.
+    Preserves existing vendor and project assignments.
+    """
+    uncategorized = (
+        db.query(Transaction)
+        .filter(
+            Transaction.account_id == account_id,
+            Transaction.vendor != None,
+            Transaction.category == None,
+            Transaction.is_transfer == False,
+        )
+        .all()
+    )
+
+    if not uncategorized:
+        return {"found": 0, "suggestions_created": 0, "errors": 0}
+
+    # Distinct categories
+    cat_rows = (
+        db.query(Transaction.category)
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .distinct()
+        .all()
+    )
+    category_list = sorted([r[0] for r in cat_rows])
+
+    if not category_list:
+        return {"found": len(uncategorized), "suggestions_created": 0, "errors": 0,
+                "detail": "No existing categories to match against"}
+
+    correspondence = _build_correspondence_history(db, account_id)
+
+    # Build transaction list for LLM (deduplicate by exact description)
+    existing_patterns = {
+        s.pattern_matched
+        for s in db.query(ImportSuggestion.pattern_matched)
+        .filter(
+            ImportSuggestion.account_id == account_id,
+            ImportSuggestion.status == "pending",
+        )
+        .all()
+        if s.pattern_matched
+    }
+
+    groups: dict[str, dict] = {}
+    for tx in uncategorized:
+        key = tx.description.strip()
+        if key in existing_patterns:
+            continue
+        if key not in groups:
+            groups[key] = {
+                "description": key,
+                "vendor": tx.vendor,
+                "project": tx.project,
+                "tx_ids": [],
+            }
+        groups[key]["tx_ids"].append(tx.id)
+
+    if not groups:
+        return {"found": len(uncategorized), "suggestions_created": 0, "errors": 0}
+
+    tx_list = [{"description": g["description"], "vendor": g["vendor"]} for g in groups.values()]
+    try:
+        llm_results = await researcher.research_categories(tx_list, category_list, correspondence)
+    except (ConnectionError, ValueError) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    # Create suggestions
+    suggestions_created = 0
+    errors = 0
+    group_keys = list(groups.keys())
+
+    for idx, result in llm_results.items():
+        if idx >= len(group_keys):
+            continue
+        key = group_keys[idx]
+        group = groups[key]
+        category = result.get("category")
+        if not category:
+            errors += 1
+            continue
+
+        # Find vendor_info_id for linking (case-insensitive)
+        vi = (
+            db.query(VendorInfo)
+            .filter(VendorInfo.account_id == account_id, func.upper(VendorInfo.vendor_name) == group["vendor"].upper())
+            .first()
+        ) if group["vendor"] else None
+
+        db.add(ImportSuggestion(
+            account_id=account_id,
+            vendor_info_id=vi.id if vi else None,
+            suggested_vendor=group["vendor"],
+            suggested_category=category,
+            suggested_project=group["project"],
             pattern_matched=key,
             transaction_ids=group["tx_ids"],
             status="pending",
@@ -1375,10 +1747,283 @@ async def research_vendors(
     if suggestions_created:
         db.commit()
 
-    return {
-        "groups_found": len(groups),
-        "skipped_transfers": skipped_transfers,
-        "skipped_existing": skipped_existing,
-        "suggestions_created": suggestions_created,
-        "errors": errors,
+    return {"found": len(uncategorized), "suggestions_created": suggestions_created, "errors": errors}
+
+
+# ── Project Research (LLM) ───────────────────────────────────────────────
+
+@app.post("/research/projects")
+async def research_projects(
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Research projects for transactions that have a vendor but no project.
+    Preserves existing vendor and category assignments.
+    """
+    unprojectd = (
+        db.query(Transaction)
+        .filter(
+            Transaction.account_id == account_id,
+            Transaction.vendor != None,
+            Transaction.project == None,
+            Transaction.is_transfer == False,
+        )
+        .all()
+    )
+
+    if not unprojectd:
+        return {"found": 0, "suggestions_created": 0, "errors": 0}
+
+    # Distinct projects
+    proj_rows = (
+        db.query(Transaction.project)
+        .filter(Transaction.account_id == account_id, Transaction.project != None)
+        .distinct()
+        .all()
+    )
+    project_list = sorted([r[0] for r in proj_rows])
+
+    if not project_list:
+        return {"found": len(unprojectd), "suggestions_created": 0, "errors": 0,
+                "detail": "No existing projects to match against"}
+
+    correspondence = _build_correspondence_history(db, account_id)
+
+    # Build transaction list for LLM (deduplicate by exact description)
+    existing_patterns = {
+        s.pattern_matched
+        for s in db.query(ImportSuggestion.pattern_matched)
+        .filter(
+            ImportSuggestion.account_id == account_id,
+            ImportSuggestion.status == "pending",
+        )
+        .all()
+        if s.pattern_matched
     }
+
+    groups: dict[str, dict] = {}
+    for tx in unprojectd:
+        key = tx.description.strip()
+        if key in existing_patterns:
+            continue
+        if key not in groups:
+            groups[key] = {
+                "description": key,
+                "vendor": tx.vendor,
+                "category": tx.category,
+                "tx_ids": [],
+            }
+        groups[key]["tx_ids"].append(tx.id)
+
+    if not groups:
+        return {"found": len(unprojectd), "suggestions_created": 0, "errors": 0}
+
+    tx_list = [{"description": g["description"], "vendor": g["vendor"], "category": g["category"]} for g in groups.values()]
+    try:
+        llm_results = await researcher.research_projects(tx_list, project_list, correspondence)
+    except (ConnectionError, ValueError) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    # Create suggestions
+    suggestions_created = 0
+    errors = 0
+    group_keys = list(groups.keys())
+
+    for idx, result in llm_results.items():
+        if idx >= len(group_keys):
+            continue
+        key = group_keys[idx]
+        group = groups[key]
+        project = result.get("project")
+        if not project:
+            errors += 1
+            continue
+
+        vi = (
+            db.query(VendorInfo)
+            .filter(VendorInfo.account_id == account_id, func.upper(VendorInfo.vendor_name) == group["vendor"].upper())
+            .first()
+        ) if group["vendor"] else None
+
+        db.add(ImportSuggestion(
+            account_id=account_id,
+            vendor_info_id=vi.id if vi else None,
+            suggested_vendor=group["vendor"],
+            suggested_category=group["category"],
+            suggested_project=project,
+            pattern_matched=key,
+            transaction_ids=group["tx_ids"],
+            status="pending",
+        ))
+        suggestions_created += 1
+
+    if suggestions_created:
+        db.commit()
+
+    return {"found": len(unprojectd), "suggestions_created": suggestions_created, "errors": errors}
+
+
+# ── Category Info CRUD ───────────────────────────────────────────────────
+
+@app.get("/category-info", response_model=List[CategoryInfoResponse])
+def list_category_info(account_id: int = Query(...), db: Session = Depends(get_db)):
+    """List all category info cards, including categories that exist only on transactions."""
+    # Get existing cards
+    cards = db.query(CategoryInfo).filter(CategoryInfo.account_id == account_id).all()
+    card_names = {c.name for c in cards}
+
+    # Get all distinct categories from transactions
+    tx_cats = (
+        db.query(Transaction.category)
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .distinct()
+        .all()
+    )
+
+    # Auto-create cards for categories that exist on transactions but have no card
+    new_cards = []
+    for (cat_name,) in tx_cats:
+        if cat_name not in card_names:
+            card = CategoryInfo(account_id=account_id, name=cat_name)
+            db.add(card)
+            new_cards.append(card)
+            card_names.add(cat_name)
+    if new_cards:
+        db.commit()
+        cards = db.query(CategoryInfo).filter(CategoryInfo.account_id == account_id).all()
+
+    # Count transactions per category
+    counts = dict(
+        db.query(Transaction.category, func.count(Transaction.id))
+        .filter(Transaction.account_id == account_id, Transaction.category != None)
+        .group_by(Transaction.category)
+        .all()
+    )
+
+    result = []
+    for c in sorted(cards, key=lambda x: x.name):
+        resp = CategoryInfoResponse.model_validate(c)
+        resp.transaction_count = counts.get(c.name, 0)
+        result.append(resp)
+    return result
+
+
+@app.post("/category-info", response_model=CategoryInfoResponse)
+def create_category_info(body: CategoryInfoCreate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    existing = db.query(CategoryInfo).filter(CategoryInfo.account_id == account_id, CategoryInfo.name == body.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Category already exists")
+    card = CategoryInfo(account_id=account_id, name=body.name, description=body.description)
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+@app.put("/category-info/{cid}", response_model=CategoryInfoResponse)
+def update_category_info(cid: int, body: CategoryInfoUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    card = db.query(CategoryInfo).filter(CategoryInfo.id == cid, CategoryInfo.account_id == account_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if body.description is not None:
+        card.description = body.description
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+@app.delete("/category-info/{cid}")
+def delete_category_info(cid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Delete a category card and unset category on all transactions using it."""
+    card = db.query(CategoryInfo).filter(CategoryInfo.id == cid, CategoryInfo.account_id == account_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Category not found")
+    # Unset category on transactions
+    affected = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.category == card.name,
+    ).update({"category": None, "auto_categorized": False}, synchronize_session=False)
+    db.delete(card)
+    db.commit()
+    return {"message": f"Deleted category '{card.name}', unset on {affected} transactions"}
+
+
+# ── Project Info CRUD ────────────────────────────────────────────────────
+
+@app.get("/project-info", response_model=List[ProjectInfoResponse])
+def list_project_info(account_id: int = Query(...), db: Session = Depends(get_db)):
+    """List all project info cards, including projects that exist only on transactions."""
+    cards = db.query(ProjectInfo).filter(ProjectInfo.account_id == account_id).all()
+    card_names = {c.name for c in cards}
+
+    tx_projs = (
+        db.query(Transaction.project)
+        .filter(Transaction.account_id == account_id, Transaction.project != None)
+        .distinct()
+        .all()
+    )
+
+    new_cards = []
+    for (proj_name,) in tx_projs:
+        if proj_name not in card_names:
+            card = ProjectInfo(account_id=account_id, name=proj_name)
+            db.add(card)
+            new_cards.append(card)
+            card_names.add(proj_name)
+    if new_cards:
+        db.commit()
+        cards = db.query(ProjectInfo).filter(ProjectInfo.account_id == account_id).all()
+
+    counts = dict(
+        db.query(Transaction.project, func.count(Transaction.id))
+        .filter(Transaction.account_id == account_id, Transaction.project != None)
+        .group_by(Transaction.project)
+        .all()
+    )
+
+    result = []
+    for c in sorted(cards, key=lambda x: x.name):
+        resp = ProjectInfoResponse.model_validate(c)
+        resp.transaction_count = counts.get(c.name, 0)
+        result.append(resp)
+    return result
+
+
+@app.post("/project-info", response_model=ProjectInfoResponse)
+def create_project_info(body: ProjectInfoCreate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    existing = db.query(ProjectInfo).filter(ProjectInfo.account_id == account_id, ProjectInfo.name == body.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Project already exists")
+    card = ProjectInfo(account_id=account_id, name=body.name, description=body.description)
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+@app.put("/project-info/{pid}", response_model=ProjectInfoResponse)
+def update_project_info(pid: int, body: ProjectInfoUpdate, account_id: int = Query(...), db: Session = Depends(get_db)):
+    card = db.query(ProjectInfo).filter(ProjectInfo.id == pid, ProjectInfo.account_id == account_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if body.description is not None:
+        card.description = body.description
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+@app.delete("/project-info/{pid}")
+def delete_project_info(pid: int, account_id: int = Query(...), db: Session = Depends(get_db)):
+    """Delete a project card and unset project on all transactions using it."""
+    card = db.query(ProjectInfo).filter(ProjectInfo.id == pid, ProjectInfo.account_id == account_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Project not found")
+    affected = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.project == card.name,
+    ).update({"project": None}, synchronize_session=False)
+    db.delete(card)
+    db.commit()
+    return {"message": f"Deleted project '{card.name}', unset on {affected} transactions"}

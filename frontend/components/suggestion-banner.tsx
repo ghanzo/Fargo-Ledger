@@ -3,8 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { VendorCombobox } from "@/components/vendor-combobox";
+import { CategoryCombobox } from "@/components/category-combobox";
+import { ProjectCombobox } from "@/components/project-combobox";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,6 +17,12 @@ import {
   CheckCheck,
 } from "lucide-react";
 
+
+interface SampleTransaction {
+  description: string;
+  amount: number;
+  date: string;
+}
 
 interface Suggestion {
   id: number;
@@ -27,6 +35,7 @@ interface Suggestion {
   transaction_ids: string[];
   transaction_count: number;
   sample_descriptions: string[];
+  sample_transactions: SampleTransaction[];
   status: string;
   created_at: string;
 }
@@ -35,6 +44,9 @@ interface SuggestionBannerProps {
   accountId: number;
   onApplied: () => void;
 }
+
+const fmt = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(n));
 
 export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -46,6 +58,8 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
     project: string;
   }>({ vendor: "", category: "", project: "" });
   const [loading, setLoading] = useState<number | null>(null);
+  const [expandedTxs, setExpandedTxs] = useState<Record<number, SampleTransaction[]>>({});
+  const [loadingTxs, setLoadingTxs] = useState<number | null>(null);
 
   const fetchSuggestions = useCallback(async () => {
     try {
@@ -168,6 +182,7 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
           {suggestions.map((s) => {
             const isEditing = editingId === s.id;
             const isLoading = loading === s.id;
+            const samples = s.sample_transactions.length > 0 ? s.sample_transactions : null;
 
             return (
               <div
@@ -181,13 +196,18 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
                       <span className="text-sm font-semibold text-foreground">
                         {s.suggested_vendor ?? "Unknown"}
                       </span>
+                      {!s.vendor_info_id && s.suggested_vendor && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/25">
+                          New vendor
+                        </span>
+                      )}
                       {s.suggested_category && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-600">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/25">
                           {s.suggested_category}
                         </span>
                       )}
                       {s.suggested_project && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 border border-teal-500/25">
                           {s.suggested_project}
                         </span>
                       )}
@@ -238,49 +258,99 @@ export function SuggestionBanner({ accountId, onApplied }: SuggestionBannerProps
                   </div>
                 </div>
 
-                {/* Sample descriptions */}
-                {s.sample_descriptions.length > 0 && (
-                  <div className="text-xs text-muted-foreground space-y-0.5 pl-1">
-                    {s.sample_descriptions.map((d, i) => (
-                      <div key={i} className="truncate font-mono">
-                        {d}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* Transaction list — expandable */}
+                {(() => {
+                  const allTxs = expandedTxs[s.id];
+                  const displayTxs = allTxs || (samples ?? []);
+                  const isExpanded = !!allTxs;
+                  const isLoadingAll = loadingTxs === s.id;
+                  const hasMore = s.transaction_count > 5 && !isExpanded;
 
-                {/* Edit mode */}
+                  if (displayTxs.length === 0 && s.sample_descriptions.length > 0) {
+                    return (
+                      <div className="text-xs text-muted-foreground space-y-0.5 pl-1">
+                        {s.sample_descriptions.map((d, i) => (
+                          <div key={i} className="truncate font-mono">{d}</div>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  return displayTxs.length > 0 ? (
+                    <div className="text-xs space-y-1 pl-1">
+                      <div className="max-h-[300px] overflow-y-auto">
+                        <table className="w-full">
+                          <tbody>
+                            {displayTxs.map((tx, i) => (
+                              <tr key={i} className="text-muted-foreground">
+                                <td className="py-0.5 pr-3 whitespace-nowrap font-mono w-24">{tx.date}</td>
+                                <td className={`py-0.5 pr-3 whitespace-nowrap font-mono text-right w-24 ${tx.amount > 0 ? "text-emerald-600" : ""}`}>
+                                  {tx.amount > 0 ? "+" : "-"}{fmt(tx.amount)}
+                                </td>
+                                <td className="py-0.5 truncate font-mono">{tx.description}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {hasMore && (
+                        <button
+                          className="text-xs text-blue-600 hover:underline"
+                          disabled={isLoadingAll}
+                          onClick={async () => {
+                            setLoadingTxs(s.id);
+                            try {
+                              const res = await api.post(`/transactions/by-ids?account_id=${accountId}`, s.transaction_ids);
+                              setExpandedTxs((prev) => ({ ...prev, [s.id]: res.data }));
+                            } catch {
+                              toast.error("Failed to load transactions");
+                            } finally {
+                              setLoadingTxs(null);
+                            }
+                          }}
+                        >
+                          {isLoadingAll ? "Loading..." : `Show all ${s.transaction_count} transactions`}
+                        </button>
+                      )}
+                      {isExpanded && (
+                        <button
+                          className="text-xs text-muted-foreground hover:underline"
+                          onClick={() => setExpandedTxs((prev) => {
+                            const next = { ...prev };
+                            delete next[s.id];
+                            return next;
+                          })}
+                        >
+                          Collapse
+                        </button>
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Edit mode with comboboxes */}
                 {isEditing && (
                   <div className="border-t pt-2 space-y-2">
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="text-xs text-muted-foreground mb-0.5 block">Vendor</label>
-                        <Input
-                          className="h-7 text-xs"
+                        <VendorCombobox
                           value={editValues.vendor}
-                          onChange={(e) =>
-                            setEditValues((v) => ({ ...v, vendor: e.target.value }))
-                          }
+                          onChange={(v) => setEditValues((prev) => ({ ...prev, vendor: v }))}
                         />
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground mb-0.5 block">Category</label>
-                        <Input
-                          className="h-7 text-xs"
+                        <CategoryCombobox
                           value={editValues.category}
-                          onChange={(e) =>
-                            setEditValues((v) => ({ ...v, category: e.target.value }))
-                          }
+                          onChange={(v) => setEditValues((prev) => ({ ...prev, category: v }))}
                         />
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground mb-0.5 block">Project</label>
-                        <Input
-                          className="h-7 text-xs"
+                        <ProjectCombobox
                           value={editValues.project}
-                          onChange={(e) =>
-                            setEditValues((v) => ({ ...v, project: e.target.value }))
-                          }
+                          onChange={(v) => setEditValues((prev) => ({ ...prev, project: v }))}
                         />
                       </div>
                     </div>

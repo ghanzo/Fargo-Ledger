@@ -511,17 +511,22 @@ function VendorsTab() {
     try {
       const res = await api.post(`/research/vendors?account_id=${activeAccount.id}`);
       const d = res.data;
-      if (d.suggestions_created > 0) {
-        toast.success(`Research complete: ${d.suggestions_created} suggestion${d.suggestions_created !== 1 ? "s" : ""} created. Review on the Transactions page.`);
-      } else if (d.groups_found === 0) {
+      const parts: string[] = [];
+      if (d.rule_matched > 0) parts.push(`${d.rule_matched} matched by rules`);
+      if (d.suggestions_created > 0) parts.push(`${d.suggestions_created} new suggestion${d.suggestions_created !== 1 ? "s" : ""}`);
+      if (d.cards_created > 0) parts.push(`${d.cards_created} vendor card${d.cards_created !== 1 ? "s" : ""} created`);
+      if (parts.length > 0) {
+        toast.success(parts.join(", ") + ". Review suggestions on Transactions page.");
+        await fetchVendors();
+      } else if (d.groups_found === 0 && d.rule_matched === 0) {
         toast.info("No uncategorized transactions to research.");
       } else {
-        toast.info(`Found ${d.groups_found} groups but no new suggestions (${d.skipped_existing} already pending, ${d.skipped_transfers} transfers skipped).`);
+        toast.info(`${d.skipped_existing} already pending, ${d.skipped_transfers} transfers skipped.`);
       }
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
       if (e?.response?.status === 503) {
-        toast.error(detail || "Cannot connect to Ollama. Make sure it's running on your machine.");
+        toast.error(detail || "Cannot connect to LLM service. Check your XAI_API_KEY.");
       } else {
         toast.error(detail || "Research failed.");
       }
@@ -1182,8 +1187,216 @@ function ChartOfAccountsTab() {
 
 // ── Management Page ───────────────────────────────────────────────────────────
 
+// ── Categories Tab ────────────────────────────────────────────────────────────
+
+interface CategoryInfoData {
+  id: number;
+  account_id: number;
+  name: string;
+  description: string | null;
+  transaction_count: number;
+}
+
+function CategoriesTab() {
+  const { activeAccount } = useAccount();
+  const [categories, setCategories] = useState<CategoryInfoData[]>([]);
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDesc, setEditDesc] = useState("");
+
+  const fetchCategories = useCallback(async () => {
+    if (!activeAccount) return;
+    const res = await api.get(`/category-info?account_id=${activeAccount.id}`);
+    setCategories(res.data);
+  }, [activeAccount]);
+
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
+  const handleSave = async (c: CategoryInfoData) => {
+    try {
+      await api.put(`/category-info/${c.id}?account_id=${activeAccount!.id}`, { description: editDesc });
+      setEditingId(null);
+      await fetchCategories();
+    } catch { toast.error("Failed to save"); }
+  };
+
+  const handleDelete = async (c: CategoryInfoData) => {
+    if (!confirm(`Delete "${c.name}"? This will unset the category on ${c.transaction_count} transactions.`)) return;
+    try {
+      const res = await api.delete(`/category-info/${c.id}?account_id=${activeAccount!.id}`);
+      toast.success(res.data.message);
+      await fetchCategories();
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  const filtered = categories.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search categories..." className="pl-9 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <span className="text-sm text-muted-foreground">{categories.length} categories</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {filtered.map((c) => {
+          const isEditing = editingId === c.id;
+          return (
+            <Card key={c.id} className="relative group">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">{c.name}</h3>
+                    <span className="text-xs text-muted-foreground">{c.transaction_count} transaction{c.transaction_count !== 1 ? "s" : ""}</span>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500" onClick={() => handleDelete(c)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      className="w-full text-xs rounded border bg-background px-2 py-1.5 min-h-[60px] resize-none"
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      placeholder="Describe what this category is for..."
+                    />
+                    <div className="flex gap-1.5">
+                      <Button size="sm" className="h-6 text-xs" onClick={() => handleSave(c)}>Save</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p
+                    className="text-xs text-muted-foreground cursor-pointer hover:text-foreground min-h-[24px]"
+                    onClick={() => { setEditingId(c.id); setEditDesc(c.description || ""); }}
+                  >
+                    {c.description || "Click to add description..."}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Projects Tab ─────────────────────────────────────────────────────────────
+
+interface ProjectInfoData {
+  id: number;
+  account_id: number;
+  name: string;
+  description: string | null;
+  transaction_count: number;
+}
+
+function ProjectsTab() {
+  const { activeAccount } = useAccount();
+  const [projects, setProjects] = useState<ProjectInfoData[]>([]);
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDesc, setEditDesc] = useState("");
+
+  const fetchProjects = useCallback(async () => {
+    if (!activeAccount) return;
+    const res = await api.get(`/project-info?account_id=${activeAccount.id}`);
+    setProjects(res.data);
+  }, [activeAccount]);
+
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+
+  const handleSave = async (p: ProjectInfoData) => {
+    try {
+      await api.put(`/project-info/${p.id}?account_id=${activeAccount!.id}`, { description: editDesc });
+      setEditingId(null);
+      await fetchProjects();
+    } catch { toast.error("Failed to save"); }
+  };
+
+  const handleDelete = async (p: ProjectInfoData) => {
+    if (!confirm(`Delete "${p.name}"? This will unset the project on ${p.transaction_count} transactions.`)) return;
+    try {
+      const res = await api.delete(`/project-info/${p.id}?account_id=${activeAccount!.id}`);
+      toast.success(res.data.message);
+      await fetchProjects();
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  const filtered = projects.filter((p) =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search projects..." className="pl-9 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <span className="text-sm text-muted-foreground">{projects.length} projects</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {filtered.map((p) => {
+          const isEditing = editingId === p.id;
+          return (
+            <Card key={p.id} className="relative group">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">{p.name}</h3>
+                    <span className="text-xs text-muted-foreground">{p.transaction_count} transaction{p.transaction_count !== 1 ? "s" : ""}</span>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500" onClick={() => handleDelete(p)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      className="w-full text-xs rounded border bg-background px-2 py-1.5 min-h-[60px] resize-none"
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      placeholder="Describe what this project is for..."
+                    />
+                    <div className="flex gap-1.5">
+                      <Button size="sm" className="h-6 text-xs" onClick={() => handleSave(p)}>Save</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p
+                    className="text-xs text-muted-foreground cursor-pointer hover:text-foreground min-h-[24px]"
+                    onClick={() => { setEditingId(p.id); setEditDesc(p.description || ""); }}
+                  >
+                    {p.description || "Click to add description..."}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
 export default function ManagementPage() {
-  const [tab, setTab] = useState<"vendors" | "properties" | "chart">("vendors");
+  const [tab, setTab] = useState<"vendors" | "categories" | "projects" | "properties" | "chart">("vendors");
 
   const tabCls = (t: string) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -1197,16 +1410,20 @@ export default function ManagementPage() {
       <div className="max-w-7xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold text-foreground mb-1">Management</h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Manage vendors, properties, and chart of accounts.
+          Manage vendors, categories, projects, properties, and chart of accounts.
         </p>
 
         <div className="flex border-b mb-6">
           <button className={tabCls("vendors")} onClick={() => setTab("vendors")}>Vendors</button>
-          <button className={tabCls("properties")} onClick={() => setTab("properties")}>Projects &amp; Tenants</button>
+          <button className={tabCls("categories")} onClick={() => setTab("categories")}>Categories</button>
+          <button className={tabCls("projects")} onClick={() => setTab("projects")}>Projects</button>
+          <button className={tabCls("properties")} onClick={() => setTab("properties")}>Properties &amp; Tenants</button>
           <button className={tabCls("chart")} onClick={() => setTab("chart")}>Chart of Accounts</button>
         </div>
 
         {tab === "vendors" && <VendorsTab />}
+        {tab === "categories" && <CategoriesTab />}
+        {tab === "projects" && <ProjectsTab />}
         {tab === "properties" && <PropertiesTab />}
         {tab === "chart" && <ChartOfAccountsTab />}
       </div>

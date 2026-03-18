@@ -15,14 +15,21 @@ This document tracks explorations into tools, techniques, and approaches that co
 **Next step:** Collect sample CSV exports from 3-4 banks, document column layouts, identify common patterns.
 
 ### Auto-categorization Approaches
-**Status:** Partially explored (current system uses pattern matching with confidence scoring)
-**What we have:** Token extraction from descriptions, substring matching against vendor rules, confidence decay on corrections. Works well for repeat merchants.
-**What's out there:**
+**Status:** Active — constrained-choice LLM research implemented (2026-03-17)
+**What we have:**
+- **Pattern matching:** Token extraction from descriptions, substring matching against vendor rules, confidence decay on corrections. Works well for repeat merchants.
+- **LLM research (Grok):** Constrained-choice batch classification. Sends existing vendors, categories, projects, and a correspondence history of verified past mappings. LLM must use existing categories, prefer existing vendors. New vendors created as unconfirmed until user approves.
+- **Correspondence history:** Three tiers of training signal ranked by quality: (1) approved suggestions, (2) user-edited transactions, (3) rule-matched auto-categorized. Up to 40 examples sent per research run. This gives Grok real context about how the user classifies their transactions.
+- **Vendor confirmation flow:** LLM-created vendor cards start as `confirmed=false`. Only confirmed vendors appear in future LLM context, preventing bad guesses from snowballing.
+
+**What's out there (not yet explored):**
 - TF-IDF on transaction descriptions (lightweight, no external deps)
 - Simple Naive Bayes classifier trained on user's own labeled data
-- Rule-based systems with user-defined regex patterns
 - Plaid's category taxonomy as a starting vocabulary
-**Open question:** Is the current pattern system good enough at scale (10k+ transactions), or does it need ML?
+
+**Open questions:**
+- Cold-start: first research run on a new account has no vendors/categories/history — LLM is basically unconstrained. Consider seeding with common categories.
+- Scale: correspondence history capped at 40 examples. May need smarter selection (e.g. diversity sampling) for accounts with hundreds of vendors.
 
 ### Receipt/Document Attachment
 **Status:** Not yet researched
@@ -59,3 +66,4 @@ _Move entries here when they've been fully explored and either adopted or reject
 | Suggestion review queue | Adopted. Import creates pending suggestions; user approves/edits/dismisses via banner UI. | 2026-02-28 |
 | Dark mode | Adopted. `next-themes` + OKLCH color variables. Toggle in NavBar. | 2026-02-27 |
 | Vendor confidence scoring | Adopted. Self-correcting: `1.0 - (corrected / assigned)`. Thresholds at 0.85/0.70. Sign-aware rules. | 2026-02-28 |
+| LLM vendor research | Adopted. Grok-only (removed Ollama/Claude). Constrained-choice batch prompts with correspondence history. Vendor confirmation flow for new vendors. | 2026-03-17 |

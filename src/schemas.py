@@ -94,6 +94,11 @@ class BudgetStatus(BaseModel):
 
 # ── Import Suggestion schemas ──────────────────────────────────────────────
 
+class SuggestionSampleTransaction(BaseModel):
+    description: str
+    amount: float
+    date: str
+
 class ImportSuggestionResponse(BaseModel):
     id:                  int
     account_id:          int
@@ -105,6 +110,7 @@ class ImportSuggestionResponse(BaseModel):
     transaction_ids:     List[str]
     transaction_count:   int
     sample_descriptions: List[str]
+    sample_transactions: List[SuggestionSampleTransaction] = []
     status:              str
     created_at:          datetime
 
@@ -158,6 +164,7 @@ class VendorInfoResponse(BaseModel):
     id:                  int
     account_id:          int
     vendor_name:         str
+    confirmed:           bool = True
     business_name:       Optional[str] = None
     trade_category:      Optional[str] = None
     phone:               Optional[str] = None
@@ -254,6 +261,44 @@ class CategoryMapResponse(BaseModel):
     account_code: str
     account_name: str
     account_type: str
+
+    class Config:
+        from_attributes = True
+
+# ── Category Info schemas ─────────────────────────────────────────────────
+
+class CategoryInfoCreate(BaseModel):
+    name:        str
+    description: Optional[str] = None
+
+class CategoryInfoUpdate(BaseModel):
+    description: Optional[str] = None
+
+class CategoryInfoResponse(BaseModel):
+    id:          int
+    account_id:  int
+    name:        str
+    description: Optional[str] = None
+    transaction_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+# ── Project Info schemas ──────────────────────────────────────────────────
+
+class ProjectInfoCreate(BaseModel):
+    name:        str
+    description: Optional[str] = None
+
+class ProjectInfoUpdate(BaseModel):
+    description: Optional[str] = None
+
+class ProjectInfoResponse(BaseModel):
+    id:          int
+    account_id:  int
+    name:        str
+    description: Optional[str] = None
+    transaction_count: int = 0
 
     class Config:
         from_attributes = True

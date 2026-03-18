@@ -1,6 +1,6 @@
 # System Architecture — Fargo Ledger
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 
 This document describes how the system works today. It is the map of the codebase — modules, data flow, APIs, schema, and key algorithms.
 
@@ -34,6 +34,7 @@ PostgreSQL 15  (localhost:5432)
 | `src/api.py` | ~1,100 | All REST endpoints (42+ routes across 9 resource groups) |
 | `src/models.py` | ~140 | SQLAlchemy ORM models (7 tables) with relationships |
 | `src/schemas.py` | ~210 | Pydantic request/response schemas |
+| `src/researcher.py` | ~350 | LLM-powered vendor research (Grok): constrained batch classification, vendor enrichment |
 | `src/importer.py` | ~245 | CSV parsing, format auto-detection, pattern extraction, vendor matching, deduplication |
 | `src/watcher.py` | ~200 | Folder watcher for auto-importing CSVs from inbox |
 | `src/database.py` | ~16 | SQLAlchemy engine and session setup |
@@ -74,6 +75,34 @@ CSV file
   -> Create import_suggestions for high-confidence matches (pending)
   -> Return {imported, skipped, suggestions_created}
 ```
+
+**LLM Research Pipeline (Grok):**
+```
+POST /research/vendors?account_id=X
+  -> Phase 1: Pattern-match uncategorized txns against existing vendor rules
+     -> Creates suggestions for rule-matched groups (user reviews)
+  -> Phase 2: Gather context for LLM
+     -> Confirmed vendors (name, category, patterns) — excludes unconfirmed
+     -> Distinct categories + projects from transactions
+     -> Correspondence history (up to 40 verified mappings):
+        1. Approved suggestions (strongest signal)
+        2. User-edited transactions (manual categorization)
+        3. Rule-matched auto-categorized (bulk patterns)
+     -> Batch 12 descriptions per Grok call (grok-4-1-fast-reasoning)
+     -> Constrained prompt: LLM must use existing categories, prefer existing vendors
+  -> Phase 3: Process LLM results
+     -> Known vendor match: link suggestion to existing vendor card
+     -> New vendor: create unconfirmed vendor card (confirmed=false)
+     -> All results become pending suggestions for user review
+  -> User approves suggestion:
+     -> Transactions updated with vendor/category/project
+     -> Vendor card confirmed (becomes available for future LLM context)
+     -> Rules updated with approved category/project
+  -> User dismisses suggestion:
+     -> Unconfirmed vendor card cleaned up if no other pending suggestions reference it
+```
+
+**Privacy:** Only scrubbed bank descriptions sent to LLM. `scrub_description()` strips names, IDs, account numbers, ref numbers. Never sends amounts, dates, or personal identifiers.
 
 **Watcher Pipeline:**
 ```
@@ -198,6 +227,7 @@ accounts
   +-- vendor_info (FK account_id, CASCADE)
   |     |-- id (PK, auto)
   |     |-- vendor_name (UNIQUE per account)
+  |     |-- confirmed (bool, default true — false for LLM-created awaiting approval)
   |     |-- business_name, trade_category, phone, email, rating, notes
   |     |-- rules (JSON: patterns, defaults, by_sign, confidence, enabled)
   |     |
@@ -229,6 +259,7 @@ accounts
 | `transaction.is_cleaned` | Indicates transaction has been reviewed/categorized |
 | `transaction.auto_categorized` | Set when vendor rules auto-assigned fields on import |
 | `transaction.raw_data` | Original CSV row as JSON, preserved for audit and format re-detection |
+| `vendor_info.confirmed` | False = LLM-created, awaiting user approval. Excluded from LLM context until confirmed. True after user approves or for user-created cards |
 | `vendor_info.rules` | JSON blob with patterns, defaults, by_sign, confidence, enabled, assigned_count, corrected_count |
 
 ---
@@ -345,6 +376,7 @@ Canvas-based rendering via html-to-image + jsPDF with smart page breaks.
 | `NEXT_PUBLIC_API_URL` | Frontend `.env.local` | `http://localhost:8001` | API base URL |
 | `CORS_ORIGINS` | Backend | `http://localhost:3000` | Allowed CORS origins (comma-separated) |
 | `DATABASE_URL` | Backend | (from docker-compose) | PostgreSQL connection string |
+| `XAI_API_KEY` | Backend | (required for research) | xAI Grok API key for vendor research & enrichment |
 
 ### Dependencies
 **Backend:** FastAPI ~0.115, SQLAlchemy ~2.0, psycopg2-binary ~2.9, pandas ~2.2, uvicorn ~0.34, pydantic ~2.10, python-multipart ~0.0.20, watchdog ~6.0

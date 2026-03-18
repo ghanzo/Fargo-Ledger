@@ -52,7 +52,7 @@ export function TransactionPanel({ transaction, open, onClose, onSave }: Transac
     // Only fetch suggestions for uncategorized transactions
     if (!transaction.is_cleaned) {
       api
-        .get(`/transactions/${transaction.id}/suggest`)
+        .get(`/transactions/${transaction.id}/suggest?account_id=${activeAccount?.id}`)
         .then((res) => {
           if (res.data.vendor || res.data.category) setSuggestion(res.data);
         })

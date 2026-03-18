@@ -1,7 +1,7 @@
 """
 LLM-powered vendor research for uncategorized transactions.
 Sends ONLY bank description text — never amounts, dates, or personal info.
-Supports Ollama (local, default) and Claude API (optional).
+Uses Grok (xAI) for both research and enrichment.
 """
 import json
 import logging
@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 ENRICH_PROVIDER = os.getenv("ENRICH_PROVIDER", "grok")
 
 # ── Privacy filters ─────────────────────────────────────────────────────────
@@ -73,30 +70,10 @@ def scrub_description(description: str) -> str:
     return result
 
 
-# ── Prompt ──────────────────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """You are a financial transaction classifier. Given a bank transaction description, identify:
-1. vendor_name: The business name (clean, title case, e.g. "Whole Foods Market")
-2. trade_category: The type of business (e.g. "Grocery Store", "Gas Station", "Restaurant", "Utility")
-3. category: The expense category (e.g. "Groceries", "Transportation", "Dining Out", "Utilities")
-
-If you cannot determine the vendor, set vendor_name to null.
-Respond ONLY with a JSON object. No explanation, no markdown."""
-
-_USER_TEMPLATE = "Description: {description}"
-
-
-def _build_messages(description: str) -> list[dict]:
-    scrubbed = scrub_description(description)
-    return [
-        {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": _USER_TEMPLATE.format(description=scrubbed)},
-    ]
-
-
 # ── JSON extraction ─────────────────────────────────────────────────────────
 
 _JSON_RE = re.compile(r'\{[^{}]*\}', re.DOTALL)
+_JSON_ARRAY_RE = re.compile(r'\[.*\]', re.DOTALL)
 
 
 def _parse_llm_response(text: str) -> dict | None:
@@ -116,63 +93,49 @@ def _parse_llm_response(text: str) -> dict | None:
     return None
 
 
-# ── Ollama ──────────────────────────────────────────────────────────────────
-
-async def query_ollama(description: str, base_url: str = OLLAMA_URL, model: str = OLLAMA_MODEL) -> dict | None:
-    """Send a description to Ollama and return parsed vendor info."""
-    messages = _build_messages(description)
+def _parse_llm_response_array(text: str) -> list[dict] | None:
+    """Extract a JSON array from LLM response text."""
+    # Strip markdown fences
+    cleaned = re.sub(r'```(?:json)?\s*', '', text).strip()
+    cleaned = re.sub(r'```\s*$', '', cleaned).strip()
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{base_url}/api/chat",
-                json={"model": model, "messages": messages, "stream": False},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data.get("message", {}).get("content", "")
-            return _parse_llm_response(content)
-    except httpx.ConnectError:
-        logger.error("Cannot connect to Ollama at %s", base_url)
-        raise ConnectionError(f"Cannot connect to Ollama at {base_url}. Is Ollama running?")
-    except Exception as e:
-        logger.warning("Ollama query failed for description: %s", e)
-        return None
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Try extracting array from surrounding text
+    match = _JSON_ARRAY_RE.search(text)
+    if match:
+        try:
+            result = json.loads(match.group())
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
 
 
-# ── Claude API ──────────────────────────────────────────────────────────────
+# ── Grok (xAI) API — single description ─────────────────────────────────────
 
-async def query_claude(description: str) -> dict | None:
-    """Send a description to Claude API and return parsed vendor info."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
-    messages = [{"role": "user", "content": _USER_TEMPLATE.format(description=description)}]
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 256,
-                    "system": _SYSTEM_PROMPT,
-                    "messages": messages,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data.get("content", [{}])[0].get("text", "")
-            return _parse_llm_response(content)
-    except Exception as e:
-        logger.warning("Claude query failed: %s", e)
-        return None
+_SYSTEM_PROMPT = """You are a financial transaction classifier. Given a bank transaction description, identify:
+1. vendor_name: The business name (clean, title case, e.g. "Whole Foods Market")
+2. trade_category: The type of business (e.g. "Grocery Store", "Gas Station", "Restaurant", "Utility")
+3. category: The expense category (e.g. "Groceries", "Transportation", "Dining Out", "Utilities")
+
+If you cannot determine the vendor, set vendor_name to null.
+Respond ONLY with a JSON object. No explanation, no markdown."""
+
+_USER_TEMPLATE = "Description: {description}"
 
 
-# ── Grok (xAI) API ──────────────────────────────────────────────────────────
+def _build_messages(description: str) -> list[dict]:
+    scrubbed = scrub_description(description)
+    return [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": _USER_TEMPLATE.format(description=scrubbed)},
+    ]
+
 
 async def query_grok(description: str) -> dict | None:
     """Send a description to xAI Grok API and return parsed vendor info."""
@@ -244,58 +207,17 @@ def _build_enrich_messages(vendor_name: str, sample_descriptions: list[str] | No
     ]
 
 
-async def _enrich_ollama(vendor_name: str, sample_descriptions: list[str] | None = None, context: dict | None = None, base_url: str = OLLAMA_URL, model: str = OLLAMA_MODEL) -> dict | None:
-    messages = _build_enrich_messages(vendor_name, sample_descriptions, context)
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{base_url}/api/chat",
-                json={"model": model, "messages": messages, "stream": False},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data.get("message", {}).get("content", "")
-            return _parse_llm_response(content)
-    except httpx.ConnectError:
-        logger.error("Cannot connect to Ollama at %s", base_url)
-        raise ConnectionError(f"Cannot connect to Ollama at {base_url}. Is Ollama running?")
-    except Exception as e:
-        logger.warning("Ollama enrich failed for vendor: %s", e)
-        return None
-
-
-async def _enrich_claude(vendor_name: str, sample_descriptions: list[str] | None = None, context: dict | None = None) -> dict | None:
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
-    user_msg = _build_enrich_messages(vendor_name, sample_descriptions, context)[1]["content"]
-    messages = [{"role": "user", "content": user_msg}]
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 512,
-                    "system": _ENRICH_SYSTEM_PROMPT,
-                    "messages": messages,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data.get("content", [{}])[0].get("text", "")
-            return _parse_llm_response(content)
-    except Exception as e:
-        logger.warning("Claude enrich failed: %s", e)
-        return None
-
-
-async def _enrich_grok(vendor_name: str, sample_descriptions: list[str] | None = None, context: dict | None = None) -> dict | None:
+async def enrich_vendor(
+    vendor_name: str,
+    sample_descriptions: list[str] | None = None,
+    context: dict | None = None,
+    provider: str = ENRICH_PROVIDER,
+) -> dict | None:
+    """
+    Ask the LLM to fill in publicly available business information for a vendor.
+    Includes sample transaction descriptions and metadata context when available.
+    Returns dict with keys: business_name, trade_category, website, address, phone, service_description.
+    """
     api_key = os.getenv("XAI_API_KEY")
     if not api_key:
         raise ValueError("XAI_API_KEY not set. Add it to your .env file.")
@@ -329,60 +251,367 @@ async def _enrich_grok(vendor_name: str, sample_descriptions: list[str] | None =
         return None
 
 
-async def enrich_vendor(
-    vendor_name: str,
-    sample_descriptions: list[str] | None = None,
-    context: dict | None = None,
-    provider: str = ENRICH_PROVIDER,
-) -> dict | None:
-    """
-    Ask the LLM to fill in publicly available business information for a vendor.
-    Includes sample transaction descriptions and metadata context when available.
-    Returns dict with keys: business_name, trade_category, website, address, phone, service_description.
-    """
-    if provider == "grok":
-        return await _enrich_grok(vendor_name, sample_descriptions, context)
-    elif provider == "claude":
-        return await _enrich_claude(vendor_name, sample_descriptions, context)
-    else:
-        return await _enrich_ollama(vendor_name, sample_descriptions, context)
+# ── Constrained-choice batch research ────────────────────────────────────────
+
+BATCH_SIZE = 50  # descriptions per LLM call
+
+_CONSTRAINED_SYSTEM_PROMPT = """You are a financial transaction classifier. You will classify bank transaction descriptions using the user's EXISTING vendors, categories, and projects.
+
+RULES:
+1. ALWAYS use an existing category from the provided list. Never invent new categories.
+2. PREFER existing vendors. Only create a new vendor if no existing vendor is a plausible match.
+3. Set is_new_vendor to true ONLY when creating a genuinely new vendor not in the existing list.
+4. For new vendors: use clean title case (e.g. "Whole Foods Market"), and pick the closest existing category.
+5. If you cannot determine the vendor at all, set vendor_name to null.
+6. For project: use the correspondence history to infer which project a vendor or category typically belongs to. Only use existing projects from the provided list. Set to null if no confident match.
+
+Respond ONLY with a JSON array. No explanation, no markdown."""
 
 
-# ── Main research function ──────────────────────────────────────────────────
-
-MAX_GROUPS_PER_RUN = 50
-
-
-async def research_descriptions(
+def _build_constrained_prompt(
     descriptions: list[str],
-    provider: str = LLM_PROVIDER,
+    vendors: list[dict],
+    categories: list[str],
+    projects: list[str],
+    correspondence: list[dict],
+) -> str:
+    """Build the user prompt with context for constrained classification.
+
+    correspondence: list of {desc, vendor, category, project, source} dicts
+        where source is 'approved', 'user-edited', or 'rule-matched'.
+    """
+    parts = []
+
+    # Vendor list with patterns and default categories
+    if vendors:
+        vendor_lines = []
+        for v in vendors[:250]:  # cap to avoid token overflow
+            line = f"- {v['name']} [{v.get('category', '?')}]"
+            if v.get("patterns"):
+                line += f" (patterns: {', '.join(v['patterns'][:5])})"
+            vendor_lines.append(line)
+        parts.append("Existing Vendors:\n" + "\n".join(vendor_lines))
+
+    # Categories
+    if categories:
+        parts.append("Existing Categories: " + ", ".join(categories))
+
+    # Projects
+    if projects:
+        parts.append("Existing Projects: " + ", ".join(projects))
+
+    # Correspondence history — verified past mappings ranked by quality
+    if correspondence:
+        hist_lines = []
+        for c in correspondence[:40]:
+            line = f'- "{c["desc"]}" -> vendor: {c["vendor"]}, category: {c["category"]}'
+            if c.get("project"):
+                line += f', project: {c["project"]}'
+            line += f' [{c["source"]}]'
+            hist_lines.append(line)
+        parts.append("Correspondence History (verified past mappings):\n" + "\n".join(hist_lines))
+
+    # Descriptions to classify
+    desc_lines = []
+    for i, desc in enumerate(descriptions):
+        desc_lines.append(f"{i}: {scrub_description(desc)}")
+    parts.append("Classify these descriptions:\n" + "\n".join(desc_lines))
+
+    parts.append(
+        'Respond with a JSON array where each element has: '
+        '{"index": <int>, "vendor_name": <str|null>, "category": <str>, "trade_category": <str>, "project": <str|null>, "is_new_vendor": <bool>}'
+    )
+
+    return "\n\n".join(parts)
+
+
+async def _query_grok_batch(user_prompt: str) -> list[dict] | None:
+    """Send a batch constrained prompt to Grok and return parsed array."""
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        raise ValueError("XAI_API_KEY not set. Add it to your .env file.")
+    messages = [
+        {"role": "system", "content": _CONSTRAINED_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "grok-4-1-fast-reasoning",
+                    "messages": messages,
+                    "max_tokens": 16384,
+                    "temperature": 0,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return _parse_llm_response_array(content)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise ValueError("Invalid XAI_API_KEY. Check your .env file.")
+        logger.warning("Grok batch query failed: %s", e)
+        return None
+    except Exception as e:
+        logger.warning("Grok batch query failed: %s", e)
+        return None
+
+
+async def research_descriptions_constrained(
+    descriptions: list[str],
+    vendors: list[dict],
+    categories: list[str],
+    projects: list[str],
+    correspondence: list[dict],
 ) -> dict[str, dict]:
     """
-    Research a list of representative descriptions.
-    Returns {description: {vendor_name, trade_category, category}} for successful lookups.
-    Processes sequentially to avoid overwhelming local Ollama.
+    Constrained-choice batch research using Grok.
+    Sends context (existing vendors, categories, projects, correspondence history)
+    so the LLM picks from the user's taxonomy instead of inventing names.
+
+    Returns {description: {vendor_name, trade_category, category, project, is_new_vendor}}.
     """
     results: dict[str, dict] = {}
 
-    # Cap per run to keep response time reasonable
-    to_process = descriptions[:MAX_GROUPS_PER_RUN]
+    # Filter skippable — no cap, process all descriptions
+    to_process = [d for d in descriptions if not is_skippable(d)]
+    if not to_process:
+        return results
 
-    for desc in to_process:
-        if is_skippable(desc):
+    # Process in batches (context sent with each batch)
+    for i in range(0, len(to_process), BATCH_SIZE):
+        batch = to_process[i:i + BATCH_SIZE]
+        user_prompt = _build_constrained_prompt(batch, vendors, categories, projects, correspondence)
+
+        parsed = await _query_grok_batch(user_prompt)
+        if not parsed:
+            logger.warning("Batch %d failed, skipping %d descriptions", i // BATCH_SIZE, len(batch))
             continue
 
-        if provider == "grok":
-            result = await query_grok(desc)
-        elif provider == "claude":
-            result = await query_claude(desc)
-        else:
-            result = await query_ollama(desc)
+        for item in parsed:
+            idx = item.get("index")
+            if idx is None or idx < 0 or idx >= len(batch):
+                continue
+            vendor_name = item.get("vendor_name")
+            if vendor_name:
+                results[batch[idx]] = {
+                    "vendor_name": vendor_name,
+                    "trade_category": item.get("trade_category"),
+                    "category": item.get("category"),
+                    "project": item.get("project"),
+                    "is_new_vendor": item.get("is_new_vendor", True),
+                }
 
-        if result and result.get("vendor_name"):
-            results[desc] = {
-                "vendor_name": result.get("vendor_name"),
-                "trade_category": result.get("trade_category"),
-                "category": result.get("category"),
-            }
+    return results
+
+
+# ── Shared batch query with custom system prompt ────────────────────────────
+
+async def _query_grok_batch_with_system(user_prompt: str, system_prompt: str) -> list[dict] | None:
+    """Send a batch prompt to Grok with a custom system prompt and return parsed array."""
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        raise ValueError("XAI_API_KEY not set. Add it to your .env file.")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "grok-4-1-fast-non-reasoning",
+                    "messages": messages,
+                    "max_tokens": 2048,
+                    "temperature": 0,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return _parse_llm_response_array(content)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise ValueError("Invalid XAI_API_KEY. Check your .env file.")
+        logger.warning("Grok batch query failed: %s", e)
+        return None
+    except Exception as e:
+        logger.warning("Grok batch query failed: %s", e)
+        return None
+
+
+# ── Category-only research ───────────────────────────────────────────────────
+
+_CATEGORY_SYSTEM_PROMPT = """You are a financial transaction classifier. You will assign expense categories to transactions using ONLY the user's existing categories.
+
+RULES:
+1. ALWAYS use an existing category from the provided list. Never invent new categories.
+2. Use the vendor name, description, and correspondence history to determine the best category.
+3. If you cannot confidently determine a category, set category to null.
+
+Respond ONLY with a JSON array. No explanation, no markdown."""
+
+
+def _build_category_prompt(
+    transactions: list[dict],
+    categories: list[str],
+    correspondence: list[dict],
+) -> str:
+    """Build prompt for category-only classification."""
+    parts = []
+
+    if categories:
+        parts.append("Existing Categories: " + ", ".join(categories))
+
+    if correspondence:
+        hist_lines = []
+        for c in correspondence[:40]:
+            line = f'- "{c["desc"]}" (vendor: {c.get("vendor", "?")}) -> category: {c["category"]}'
+            line += f' [{c["source"]}]'
+            hist_lines.append(line)
+        parts.append("Correspondence History (verified past mappings):\n" + "\n".join(hist_lines))
+
+    desc_lines = []
+    for i, tx in enumerate(transactions):
+        line = f'{i}: {scrub_description(tx["description"])}'
+        if tx.get("vendor"):
+            line += f' (vendor: {tx["vendor"]})'
+        desc_lines.append(line)
+    parts.append("Assign categories to these transactions:\n" + "\n".join(desc_lines))
+
+    parts.append(
+        'Respond with a JSON array where each element has: '
+        '{"index": <int>, "category": <str|null>}'
+    )
+
+    return "\n\n".join(parts)
+
+
+async def research_categories(
+    transactions: list[dict],
+    categories: list[str],
+    correspondence: list[dict],
+) -> dict[int, dict]:
+    """
+    Category-only research. Transactions already have vendors assigned.
+    Returns {index: {"category": str}} for successful lookups.
+    """
+    results: dict[int, dict] = {}
+    to_process = transactions
+    if not to_process:
+        return results
+
+    for i in range(0, len(to_process), BATCH_SIZE):
+        batch = to_process[i:i + BATCH_SIZE]
+        user_prompt = _build_category_prompt(batch, categories, correspondence)
+
+        parsed = await _query_grok_batch_with_system(user_prompt, _CATEGORY_SYSTEM_PROMPT)
+        if not parsed:
+            logger.warning("Category batch %d failed, skipping %d", i // BATCH_SIZE, len(batch))
+            continue
+
+        for item in parsed:
+            idx = item.get("index")
+            if idx is None or idx < 0 or idx >= len(batch):
+                continue
+            category = item.get("category")
+            if category:
+                results[i + idx] = {"category": category}
+
+    return results
+
+
+# ── Project-only research ────────────────────────────────────────────────────
+
+_PROJECT_SYSTEM_PROMPT = """You are a financial transaction classifier. You will assign projects to transactions using ONLY the user's existing projects.
+
+RULES:
+1. ALWAYS use an existing project from the provided list. Never invent new projects.
+2. Use the vendor name, category, description, and correspondence history to determine which project this transaction belongs to.
+3. If you cannot confidently determine a project, set project to null.
+
+Respond ONLY with a JSON array. No explanation, no markdown."""
+
+
+def _build_project_prompt(
+    transactions: list[dict],
+    projects: list[str],
+    correspondence: list[dict],
+) -> str:
+    """Build prompt for project-only classification."""
+    parts = []
+
+    if projects:
+        parts.append("Existing Projects: " + ", ".join(projects))
+
+    if correspondence:
+        hist_lines = []
+        for c in correspondence[:40]:
+            if not c.get("project"):
+                continue
+            line = f'- "{c["desc"]}" (vendor: {c.get("vendor", "?")}, category: {c.get("category", "?")}) -> project: {c["project"]}'
+            line += f' [{c["source"]}]'
+            hist_lines.append(line)
+        parts.append("Correspondence History (verified past mappings):\n" + "\n".join(hist_lines))
+
+    desc_lines = []
+    for i, tx in enumerate(transactions):
+        line = f'{i}: {scrub_description(tx["description"])}'
+        if tx.get("vendor"):
+            line += f' (vendor: {tx["vendor"]})'
+        if tx.get("category"):
+            line += f' (category: {tx["category"]})'
+        desc_lines.append(line)
+    parts.append("Assign projects to these transactions:\n" + "\n".join(desc_lines))
+
+    parts.append(
+        'Respond with a JSON array where each element has: '
+        '{"index": <int>, "project": <str|null>}'
+    )
+
+    return "\n\n".join(parts)
+
+
+async def research_projects(
+    transactions: list[dict],
+    projects: list[str],
+    correspondence: list[dict],
+) -> dict[int, dict]:
+    """
+    Project-only research. Transactions already have vendors/categories.
+    Returns {index: {"project": str}} for successful lookups.
+    """
+    results: dict[int, dict] = {}
+    to_process = transactions
+    if not to_process:
+        return results
+
+    for i in range(0, len(to_process), BATCH_SIZE):
+        batch = to_process[i:i + BATCH_SIZE]
+        user_prompt = _build_project_prompt(batch, projects, correspondence)
+
+        parsed = await _query_grok_batch_with_system(user_prompt, _PROJECT_SYSTEM_PROMPT)
+        if not parsed:
+            logger.warning("Project batch %d failed, skipping %d", i // BATCH_SIZE, len(batch))
+            continue
+
+        for item in parsed:
+            idx = item.get("index")
+            if idx is None or idx < 0 or idx >= len(batch):
+                continue
+            project = item.get("project")
+            if project:
+                results[i + idx] = {"project": project}
 
     return results
